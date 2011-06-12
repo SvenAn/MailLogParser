@@ -1,0 +1,7 @@
+Jun  4 00:06:46 mailserver postfix/smtpd[13536]: 58BEB3612E: client=local.server.org[10.11.12.13]
+Jun  4 00:06:46 mailserver postfix/cleanup[13508]: 58BEB3612E: message-id=<19256231.15348807237.JavaMail.someone@anonymous.net>
+Jun  4 00:06:46 mailserver dkim-filter[15534]: 58BEB3612E "DKIM-Signature" header added
+Jun  4 00:06:46 mailserver postfix/qmgr[14547]: 58BEB3612E: from=<noreply@server.org>, size=26653, nrcpt=2 (queue active)
+Jun  4 00:06:48 mailserver postfix/smtp[13271]: 58BEB3612E: to=<someone@gmail.com>, relay=gmail-smtp-in.l.google.com[74.125.79.27]:25, delay=1.8, delays=0.05/0/0.11/1.7, dsn=2.0.0, status=sent (250 2.0.0 OK 1307138809 w1si5227573eef.28)
+Jun  4 00:06:48 mailserver postfix/smtp[13268]: 58BEB3612E: to=<someone.else@hotmail.com>, relay=mx2.hotmail.com[65.55.37.72]:25, delay=1.9, delays=0.05/0/0.6/1.2, dsn=2.0.0, status=sent (250  <19256231.15348807237.JavaMail.someone@anonymous.net> Queued mail for delivery)
+Jun  4 00:06:48 mailserver postfix/qmgr[14547]: 58BEB3612E: removed

@@ -1,0 +1,6 @@
+Jun 10 06:26:01 server postfix/smtpd[14826]: 172A4B1594: client=server.foo.com[10.10.10.10]
+Jun 10 06:26:01 server postfix/cleanup[14684]: 172A4B1594: message-id=<201106102601.2A2C038@server.foo.com>
+Jun 10 06:26:01 server postfix/qmgr[14547]: 172A4B1594: from=<root@server.foo.com>, size=3143, nrcpt=1 (queue active)
+Jun 10 06:26:01 server postfix/smtp[16250]: 172A4B1594: to=<anonymous@hard.to.say.org>, relay=none, delay=0.01, delays=0.01/0/0/0, dsn=5.4.4, status=bounced (Host or domain name not found. Name service error for name=hard.to.say.org type=A: Host not found)
+Jun 10 06:26:01 server postfix/bounce[16368]: 172A4B1594: sender non-delivery notification: 19C25B15C3
+Jun 10 06:26:01 server postfix/qmgr[14547]: 172A4B1594: removed
