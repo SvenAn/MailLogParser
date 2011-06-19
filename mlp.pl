@@ -20,7 +20,7 @@ my $options = GetOptions ( "v|verbose" => \$verbose,
 
 my $address = $ARGV[0] || 'all';
 
-my ( $mailbox, $time, $server, $cmd, $id, $line );
+my ( $i, $j, $msg, $time, $server, $cmd, $id, $line, $Mailscanner );
 
 
 ###
@@ -41,7 +41,7 @@ sub printmailinfo {
 
 	if ( $verbose ) {
 		if ( $csv ) {
-			print "$mail->{deleted_time},$mail->{id},$mail->{from},$mail->{to},$mail->{size},$mail->{delay},$mail->{status},$mail->{relay},$mail->{info}\n";
+			print "$mail->{deleted_time},$mail->{id},$mail->{from},$mail->{to},$mail->{size},$mail->{delay},$mail->{status},$mail->{spam_score}, $mail->{spam_score_required}, $mail->{spam_score_detail},$mail->{relay},$mail->{info}\n";
 		}
 		else {
 			printf "%-12s %-12s From:%s To:%s Size:%s Delay:%s.\n\tStatus:%s Relay: %s\n\tInfo: %s\n", 
@@ -73,12 +73,12 @@ sub printmailinfo {
 			print "$mail->{deleted_time},$mail->{id},$mail->{from},$mail->{to},$mail->{status},$mail->{relay}\n";
 		}
 		else {
-			printf "%-12s %-12s From:%s To:%s Status:%s Sent to: %s\n", 
+			printf "%-12s %-10s %-10s From:%s To:%s Sent to: %s\n", 
 	       			$mail->{deleted_time},
 	       			$mail->{id},
+				$mail->{status},
 	       			$mail->{from},
 	       			$mail->{to},
-				$mail->{status},
 				$mail->{relay},
 		}
 	}
@@ -89,13 +89,13 @@ sub printmailinfo {
 # Parsing the postfix log line extracting all necessary info into the mailbox hash.
 sub parsepostfix {
 	# Find message or create new hash
-	my $mail = $mailbox->{messages}->{$server, $id} ||= { id => $id, time => $1, server => $2, to => [ ] };
+	my $mail = $msg->{$id} ||= { id => $id, time => $1, server => $2, to => [ ] };
 
 	if ( $cmd eq 'qmgr' ) {
 		if ( $line =~ /^removed$/ ) {
 			$mail->{deleted_time} = $time;
 			&printmailinfo( $mail );
-			delete $mailbox->{messages}->{$server, $id};
+			delete $msg->{$id};
 		} 
 		else {
 			$mail->{from} = $1 if $line =~ /^from=<([^>]+)>/;
@@ -105,7 +105,10 @@ sub parsepostfix {
 
 	}
 	elsif ( $cmd eq 'cleanup' ) {
+		#print "\tLine=$line";
 		$mail->{msgid} = $1 if $line =~ /^message-id=(<[^>]+>)/;
+		$mail->{from} = $1 if $line =~ /from=<([^>]+)>/;
+		push @{ $mail->{to}     }, $1 if $line =~/to=<([^>]+)>/;
 	}
 	elsif ( $cmd eq 'virtual' || $cmd eq 'smtp' || $cmd eq 'error' ) {
 		push @{ $mail->{to}     }, $1 if $line =~/^to=<([^>]+)>/;
@@ -118,6 +121,38 @@ sub parsepostfix {
 }
 
 
+###
+# Parsing the mailscanner log line extracting all necessary info into the mailbox hash.
+sub parsemailscanner {
+	if ( $line =~ /Message ([0-9A-F]+)\.[0-9A-F]+/ ) {
+		$id = $1;
+	}
+
+	if ( $line =~ /\((.*\@.*)\) to .* (is not spam|is spam|is too big|is whitelisted|is blacklisted)/ ) {
+		$msg->{$id}->{from} = $1;
+		$msg->{$id}->{spam_status} = $2;
+		( $msg->{$id}->{spam_score}, $msg->{$id}->{spam_score_required}, $msg->{$id}->{spam_score_detail} ) = ( $1, $2, $3 ) if 
+			$line =~ /\(score=(\d+\.\d+), required (\d+.*?), (.*)\)$/;
+	}
+	elsif ( $line =~ /Spam Actions: message .* actions are store$/ ) {
+		$msg->{$id}->{relay} = ['Quarantine'];
+		$msg->{$id}->{delay} = [''];
+		$msg->{$id}->{status} = ["$msg->{$id}->{spam_status}"];
+		$msg->{$id}->{info} = [''];
+		$msg->{$id}->{deleted_time} = "$time";
+		&printmailinfo( $msg->{$id} );
+		delete $msg->{$id};
+
+	}
+}
+
+
+
+##
+# Ok, Let's start the show!
+
+###
+# Process whatever is thrown at us via STDIN:
 while ( <STDIN> ) {
 
 	# Check if line is in a known Postfix format:
@@ -125,4 +160,28 @@ while ( <STDIN> ) {
 		( $time, $server, $cmd, $id, $line ) = ( $1, $2, $3, $4, $5 );
 		&parsepostfix( $_ );
 	}
+
+	# Check if line is in a known Mailscanner format:
+	elsif ( $_ =~ /^(\w\w\w\s{1,2}\d{1,2} \d\d:\d\d:\d\d) (\w+) MailScanner\[\d+\]: (.*)/ ) {
+		( $time, $server, $line ) = ( $1, $2 ,$3 );
+		$Mailscanner = 1;
+		&parsemailscanner( $_ );
+	}
 }
+
+die('done');
+###
+# And when we are finished, submit whatever unprocessed data there might be.
+print"\nMail still in queue or not processed yet:\n";
+for $i ( keys %$msg ) {
+	$j = '';
+	for ( keys %{$msg->{$i}} ) {
+		if ( $_ eq 'to' ) { $msg->{$i}->{$_} = join( ", ", @{ $msg->{$i}->{$_} } ) };
+		#$j .= "$msg->{$i}->{$_} ";
+		$j .= "$_: $msg->{$i}->{$_}\n";
+	}
+	if ( $address eq 'all' ||  $j =~ /$address/i ) {
+		print "$j\n";
+	}
+}
+print "Done.\n\n";
