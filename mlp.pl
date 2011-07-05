@@ -14,13 +14,16 @@ use Term::ANSIColor;
 
 
 # Default colors
-my $col_headline = 'BOLD WHITE';
-my $col_from_to  = 'BOLD WHITE';
+my $col_headline = 'YELLOW';
+my $col_time     = 'WHITE';
+my $col_from     = 'WHITE';
+my $col_to       = 'WHITE';
 my $col_id       = 'BLUE';
 my $col_size     = 'BLUE';
 my $col_info     = 'BLUE';
-my $col_status   = 'GREEN';
+#my $col_status   = 'GREEN';
 my $col_bounced  = 'RED';
+my $col_sent  = 'GREEN';
 my $col_is_spam  = 'BOLD RED';
 my $col_quarantine  = 'BOLD RED';
 
@@ -58,18 +61,9 @@ unless($@) { $bz2_loaded = 1; print "Debug: Compress::Bzip2 loaded.\n" if $debug
 my $gz_loaded;
 eval {
 	require Compress::Zlib;
-	Compress::Zlib->import();
+	#Compress::Zlib->import();
 };
 unless($@) { $gz_loaded = 1; print "Debug: Compress::Zlib loaded.\n" if $debug; }
-
-#Loading Term::ANSIColor if module is present.
-my $ansi_loaded;
-eval {
-	require Term::ANSIColor;
-	Term::ANSIColor->import();
-};
-unless($@) { $ansi_loaded = 1; print "Debug: Term::ANSIColor loaded.\n" if $debug; }
-
 
 # All sorts of variables
 my ( $i, $j, $msg, $time, $server, $cmd, $id, $line, $mailscanner, $mapper );
@@ -153,6 +147,11 @@ sub PrintMailInfo_csv() {
 	}
 }
 
+sub checkstatuscolor {
+	return $col_bounced if $_[0] =~ /bounced/;
+	return $col_sent if $_[0] =~ /sent/;
+	return 'MAGENTA';
+}
 
 ###
 # Printing the result in chosen format.
@@ -160,6 +159,8 @@ sub PrintMailInfo_visual {
 
 	my $to = join( ", ", @{ $mail->{to} } );
 	if ( $to eq '' ) { $to = '<>'; }
+
+	my $col_mystatus = checkstatuscolor( $mail->{status}[$#{$mail->{status}}] );
 
 	if ( defined( $mail->{mailscanner} ) ) {
 		if ( $verbose ) {
@@ -187,41 +188,34 @@ sub PrintMailInfo_visual {
 		}
 	}
         else {	# if NOT Mailscanner..
-                if ( $verbose ) {
-                        $i = " %-12s %-12s From:%s To:%s Size %s\n";
-			print color "$col_headline" if $color;
-                        printf  "%-12s", $mail->{first_seen};
-			print color "$col_id" if $color;
-                        printf  " %-12s", $mail->{id};
-			print color "$col_from_to" if $color;
-                        printf  " From:%s To:%s", $mail->{from}, $to;
-			print color "$col_size" if $color;
-                        printf  " Size:%s\n", $mail->{size}; 
+		print color "$col_time" if $color; printf "%-12s", $mail->{deleted_time};
+		unless( $brief ) { print color "$col_id"   if $color; printf " %-12s", $mail->{id}; }
 
-                        $j = "\tto:%s Delay:%s Status:%s Relay:%s\n\tInfo:%s\n";
+                if ( $verbose ) {
+			print color "$col_from" if $color; printf " From:%s", $mail->{from};
+			print color "$col_size" if $color; printf " Size:%s\n", $mail->{size}; 
+
                         for $i ( 0..$#{ $mail->{info} } ) {
-				print color "$col_from_to" if $color;
-                                printf "to:%s", $mail->{to}[$i];
-				print color "$col_info" if $color;
-                                printf " Delay:%s", $mail->{delay}[$i];
-				print color "$col_status" if $color;
-                                printf " Status:%s", $mail->{status}[$i];
-				print color "$col_info" if $color;
-                                printf " Relay:%s\n\tInfo:%s\n", $mail->{relay}[$i], $mail->{info}[$i];
+				print color "$col_to"       if $color; printf "\tto:%s", $mail->{to}[$i];
+				print color "$col_info"     if $color; printf " Delay:%s", $mail->{delay}[$i];
+
+				$col_mystatus = checkstatuscolor( $mail->{status}[$i] );
+				print color "$col_mystatus" if $color; printf " Status:%s", $mail->{status}[$i];
+
+				print color "$col_info"     if $color;
+				printf " Sent to:%s\n\tInfo:%s\n", $mail->{relay}[$i], $mail->{info}[$i];
                         }
                 }
-                elsif ( $brief ) {
-                        $i = "%-12s %-11s %-10s From:%-25s  To:%-30s\n";
-                        printf "$i",
-                               $mail->{deleted_time}, $mail->{id}, $mail->{status}[$#{$mail->{status}}],
-                               $mail->{from}, $mail->{to}[0];
-                }
                 else {
-                        $i = "%-12s %-10s %-10s From:%-25s To:%-30s Sent to: %s\n";
-                        printf "$i",
-                               $mail->{deleted_time}, $mail->{id}, $mail->{status}[$#{$mail->{status}}], $mail->{from},
-                               $mail->{to}[0], $mail->{relay}[$#{$mail->{relay}}],
+			print color "$col_mystatus" if $color; printf " Status:%s", $mail->{status}[$#{$mail->{status}}];
+			print color "$col_from"     if $color; printf " From:%s", $mail->{from};
+			print color "$col_to"       if $color; printf " To:%s", $to;
                 }
+                unless ( $brief || $verbose ) {
+			print color "$col_info"    if $color;
+			printf " Sent to:%s", $mail->{relay}[$#{$mail->{relay}}];
+                }
+		print "\n";
         }
 }
 
@@ -411,8 +405,8 @@ sub readgzfile {
 ####################################################################################
 # Ok, Let's start the show!
 
-# Read default config;
-#ReadConfigFile();
+print color "$col_headline" if $color; 
+print "Reading log files..\n_____________________\n\n";
 
 # If you want me to search logfiles:
 if ( defined( $logfile ) ) {
@@ -438,8 +432,10 @@ else {
 	}
 }
 
-die("Done. $lines lines parsed.\n") if ! $debug;
-
+print color "$col_headline" if $color;
+print "_____________________\nDone. $lines lines parsed.\n" if ! $debug;
+print color 'reset' if $color;
+die("\n") if ! $debug;
 
 ###
 # And when we are finished, submit whatever unprocessed data there might be.
