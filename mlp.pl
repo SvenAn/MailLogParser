@@ -9,20 +9,40 @@
 
 use strict;
 use warnings;
-use Getopt::Long;
+use Term::ANSIColor;
+#use Compress::Zlib;
 
-my ( $verbose, $brief, $logfile, $help, $csv, $debug );
+
+# Default colors
+my $col_headline = 'BOLD WHITE';
+my $col_from_to  = 'BOLD WHITE';
+my $col_id       = 'BLUE';
+my $col_size     = 'BLUE';
+my $col_info     = 'BLUE';
+my $col_status   = 'GREEN';
+my $col_bounced  = 'RED';
+my $col_is_spam  = 'BOLD RED';
+my $col_quarantine  = 'BOLD RED';
+
+
+
+my ( $verbose, $brief, $logfile, $help, $csv, $debug, $Xdebug, $color );
+&ReadConfigFile(); # Read default config before processing command line options;
+
+use Getopt::Long;
 my $path = '';
 my $NumberOfFiles = 7;
-my $options = GetOptions ( "v|verbose" => \$verbose,
-                           "b|brief"   => \$brief,
+my $options = GetOptions ( "v|verbose"   => \$verbose,
+                           "b|brief"     => \$brief,
                            "p|logpath:s" => \$path,
                            "l|logfile:s" => \$logfile,
                            "n|num:i"     => \$NumberOfFiles,
-                           "c|csv"     => \$csv,
-                           "d|debug"   => \$debug,
-                           "h|help"    => \$help );
-
+                           "c|csv"       => \$csv,
+                           "d|debug"     => \$debug,
+                           "xd|xdebug"   => \$Xdebug,
+                           "a|ansicolor" => \$color,
+                           "h|help"      => \$help
+);
 my $address = $ARGV[0] || 'all';
 
 
@@ -42,16 +62,177 @@ eval {
 };
 unless($@) { $gz_loaded = 1; print "Debug: Compress::Zlib loaded.\n" if $debug; }
 
+#Loading Term::ANSIColor if module is present.
+my $ansi_loaded;
+eval {
+	require Term::ANSIColor;
+	Term::ANSIColor->import();
+};
+unless($@) { $ansi_loaded = 1; print "Debug: Term::ANSIColor loaded.\n" if $debug; }
 
+
+# All sorts of variables
 my ( $i, $j, $msg, $time, $server, $cmd, $id, $line, $mailscanner, $mapper );
 my $lines = 0;
+my $mail;
+my @config;
+
+
+###
+# Parcing configfiles.
+sub ParceConfig {
+#	$csv = 1;
+}
+
+
+###
+# Reading config in /etc/mlp.conf and ~/.mlprc
+sub ReadConfigFile() {
+	if ( -e "/etc/mlp.conf" ) {
+		open( CONF, "/etc/mlp.conf" ) || print "ERROR: Could not open /etc/mlp.conf!";
+		@config = <CONF>;
+		close( CONF );
+		ParceConfig();
+	}
+	if ( -e "~.mlprc" ) {
+
+	}
+}
+
+
+###
+# Printing info in csv format.
+sub PrintMailInfo_csv() {
+
+	$mail->{to} = join( ";", @{ $mail->{to} } );
+	if ( $mail->{to} eq '' ) { $mail->{to} = '<>'; }
+	$mail->{delay} = join( ";", @{ $mail->{delay} } );
+	$mail->{relay} = join( ";", @{ $mail->{relay} } );
+	$mail->{status} = join( ";", @{ $mail->{status} } );
+	$mail->{info} = join( ";", @{ $mail->{info} } );
+
+	if ( defined( $mail->{mailscanner} ) ) {
+		if ( $verbose ) {
+			$i = "%s,%s,%s,From:%s,To:%s,Spaminfo:%s,%s,%s,%s,Size:%s,Delay:%s,Status:%s,Relay:%s,Info:%s\n";
+			printf "$i",
+			       $mail->{first_seen}, $mail->{deleted_time}, $mail->{id}, $mail->{from}, $mail->{to},
+			       $mail->{spam_status}, $mail->{spam_score}, $mail->{spam_score_required}, $mail->{spam_score_detail},
+			       $mail->{size}, $mail->{delay}, $mail->{status}, $mail->{relay}, $mail->{info};
+		}
+        	elsif ( $brief ) {
+                	$i = "%s,%s,%s,%s,From:%s,To:%s\n";
+                	printf "$i",
+                	        $mail->{deleted_time}, $mail->{id}, $mail->{status}, $mail->{spam_status}, $mail->{from}, $mail->{to};
+	
+        	}
+	 	else {
+                        $i = "%s,%s,%s,%s,From:%s,To:%s,Sent to:%s\n";
+                	printf "$i",
+                        	$mail->{deleted_time}, $mail->{id}, $mail->{status}, $mail->{spam_status}, $mail->{from},
+                        	$mail->{to}, $mail->{relay},
+		}
+	}
+	else {
+		if ( $verbose ) {
+                        $i = "%s,%s,%s,From:%s,To:%s,Size:%s,Delay:%s,Status:%s,Relay:%s,Info:%s\n";
+                        printf "$i",
+                               $mail->{first_seen}, $mail->{deleted_time}, $mail->{id}, $mail->{from}, $mail->{to},
+                               $mail->{size}, $mail->{delay}, $mail->{status}, $mail->{relay}, $mail->{info};
+                }
+                elsif ( $brief ) {
+                        $i = "%s,%s,%s,From:%s,To:%s\n";
+                        printf "$i",
+                                $mail->{deleted_time}, $mail->{id}, $mail->{status}, $mail->{from}, $mail->{to};
+
+                }
+                else {
+                        $i = "%s,%s,%s,From:%s,To:%s,Sent to:%s\n";
+                        printf "$i",
+                                $mail->{deleted_time}, $mail->{id}, $mail->{status}, $mail->{from}, $mail->{to}, $mail->{relay},
+                }
+	}
+}
+
+
+###
+# Printing the result in chosen format.
+sub PrintMailInfo_visual {
+
+	my $to = join( ", ", @{ $mail->{to} } );
+	if ( $to eq '' ) { $to = '<>'; }
+
+	if ( defined( $mail->{mailscanner} ) ) {
+		if ( $verbose ) {
+			$i = "%-12s %-12s From:%s To:%s Size %s\n\tSpam stat:%s, score:%s, required:%s\n\tchecks:%.120s\n";
+			printf "$i", $mail->{first_seen}, $mail->{id}, $mail->{from}, $mail->{to}[0], $mail->{size},
+			       $mail->{spam_status}, $mail->{spam_score}, $mail->{spam_score_required}, $mail->{spam_score_detail};
+
+			$j = "\tto:%s Delay:%s Status:%s Relay:%s\n\tInfo:%s\n";
+			for $i ( 0..$#{ $mail->{info} } ) {
+				printf "$j",
+					$mail->{to}[$i], $mail->{delay}[$i], $mail->{status}[$i], $mail->{relay}[$i], $mail->{info}[$i];
+			}
+		}
+		elsif ( $brief ) {
+			$i = "%-12s %-11s %-10s From:%-25s  To:%-30s\n";
+			printf "$i",
+			       $mail->{deleted_time}, $mail->{id}, $mail->{status}[$#{$mail->{status}}],
+			       $mail->{from}, $mail->{to}[0];
+		}
+		else {
+			$i = "%-12s %-10s %-10s From:%-25s To:%-30s Sent to: %s\n";
+			printf "$i",
+			       $mail->{deleted_time}, $mail->{id}, $mail->{status}[$#{$mail->{status}}], $mail->{from},
+			       $mail->{to}[0], $mail->{relay}[$#{$mail->{relay}}],
+		}
+	}
+        else {	# if NOT Mailscanner..
+                if ( $verbose ) {
+                        $i = " %-12s %-12s From:%s To:%s Size %s\n";
+			print color "$col_headline" if $color;
+                        printf  "%-12s", $mail->{first_seen};
+			print color "$col_id" if $color;
+                        printf  " %-12s", $mail->{id};
+			print color "$col_from_to" if $color;
+                        printf  " From:%s To:%s", $mail->{from}, $to;
+			print color "$col_size" if $color;
+                        printf  " Size:%s\n", $mail->{size}; 
+
+                        $j = "\tto:%s Delay:%s Status:%s Relay:%s\n\tInfo:%s\n";
+                        for $i ( 0..$#{ $mail->{info} } ) {
+				print color "$col_from_to" if $color;
+                                printf "to:%s", $mail->{to}[$i];
+				print color "$col_info" if $color;
+                                printf " Delay:%s", $mail->{delay}[$i];
+				print color "$col_status" if $color;
+                                printf " Status:%s", $mail->{status}[$i];
+				print color "$col_info" if $color;
+                                printf " Relay:%s\n\tInfo:%s\n", $mail->{relay}[$i], $mail->{info}[$i];
+                        }
+                }
+                elsif ( $brief ) {
+                        $i = "%-12s %-11s %-10s From:%-25s  To:%-30s\n";
+                        printf "$i",
+                               $mail->{deleted_time}, $mail->{id}, $mail->{status}[$#{$mail->{status}}],
+                               $mail->{from}, $mail->{to}[0];
+                }
+                else {
+                        $i = "%-12s %-10s %-10s From:%-25s To:%-30s Sent to: %s\n";
+                        printf "$i",
+                               $mail->{deleted_time}, $mail->{id}, $mail->{status}[$#{$mail->{status}}], $mail->{from},
+                               $mail->{to}[0], $mail->{relay}[$#{$mail->{relay}}],
+                }
+        }
+}
 
 
 ###
 # Printing the result in chosen format.
 sub printmailinfo {
 
-	my $mail = $_[0];
+	# Check if mail matches optional $address..
+	$j = join( ", ", @{ $mail->{to} } );
+	return  if ( $address ne 'all' && ( $mail->{from} !~ /$address/i && $j !~ /$address/i && $mail->{id} !~ /$address/ ) );
 
 	# Filling the holes of incomplete records...
 	if ( ! defined( $mail->{id} )                ) { $mail->{id}           =  '<!>'  }
@@ -59,7 +240,7 @@ sub printmailinfo {
 	if ( ! defined( $mail->{deleted_time} )      ) { $mail->{deleted_time} =  '<!>'  }
 	if ( ! defined( $mail->{from} )              ) { $mail->{from}         =  '<!>'  }
 	if ( ! defined( $mail->{to} )                ) { $mail->{to}           = ['<!>'] }
-	#if ( ! defined( $mail->{size} )              ) { $mail->{size}         =  '<!>'  }
+	if ( ! defined( $mail->{size} )              ) { $mail->{size}         =  '<!>'  }
 	if ( ! defined( $mail->{delay} )             ) { $mail->{delay}        = ['<!>'] }
 	if ( ! defined( $mail->{status} )            ) { $mail->{status}       = ['<!>'] }
 	if ( ! defined( $mail->{relay} )             ) { $mail->{relay}        = ['<!>'] }
@@ -72,114 +253,8 @@ sub printmailinfo {
 		if ( ! defined( $mail->{spam_score_detail} ) ) { $mail->{spam_score_detail}   = '<!>' }
 	}
 
-
-	$j = join( ", ", @{ $mail->{to} } );
-	return  if ( $address ne 'all' && ( $mail->{from} !~ /$address/i && $j !~ /$address/i && $mail->{id} !~ /$address/ ) );
-
-	if ( $verbose ) {
-		if ( defined( $mail->{mailscanner} ) ) {
-			if ( $csv ) {
-				$mail->{to} = join( ", ", @{ $mail->{to} } );
-				if ( $mail->{to} eq '' ) { $mail->{to} = '<>'; }
-				$mail->{delay} = join( ", ", @{ $mail->{delay} } );
-				$mail->{relay} = join( ", ", @{ $mail->{relay} } );
-				$mail->{status} = join( ", ", @{ $mail->{status} } );
-				$mail->{info} = join( "\n", @{ $mail->{info} } );
-                       		$i = "%s,%s,%s,From:%s,To:%s,Spaminfo:%s,%s,%s,%s,Size:%s,Delay:%s,Status:%s,Relay:%s,Info:%s\n";
-                		printf "$i",
-                        		$mail->{first_seen},
-                        		$mail->{deleted_time},
-                        		$mail->{id},
-                        		$mail->{from},
-                        		$mail->{to}[0],
-                        		$mail->{spam_status},
-                        		$mail->{spam_score},
-                        		$mail->{spam_score_required},
-                        		$mail->{spam_score_detail},
-                        		$mail->{size};
-                        		$mail->{delay},
-                        		$mail->{status},
-                        		$mail->{relay},
-                        		$mail->{info};
-                	}
-                	else {
-                        	$i = "%-12s %-12s From:%s To:%s Size %s\n\tSpam stat:%s, score:%s, required:%s\n\tchecks:%.120s\n";
-                		printf "$i",
-                        		$mail->{first_seen},
-                        		$mail->{id},
-                        		$mail->{from},
-                        		$mail->{to}[0],
-                        		$mail->{size},
-                        		$mail->{spam_status},
-                        		$mail->{spam_score},
-                        		$mail->{spam_score_required},
-                        		$mail->{spam_score_detail};
-
-				$j = "\tto:%s Delay:%s Status:%s Relay:%s\n\tInfo:%s\n";
-				for $i ( 0..$#{ $mail->{info} } ) {
-                			printf "$j",
-                        			$mail->{to}[$i],
-                        			$mail->{delay}[$i],
-                        			$mail->{status}[$i],
-                        			$mail->{relay}[$i],
-                        			$mail->{info}[$i];
-				}
-			}
-				
-		} 
-		else {
-			if ( $csv ) {
-				$i = "%s,%s,%s,From:%s,To:%s,Size:%s,Delay:%s,Status:%s,Relay:%s,Info:%s\n";
-			}
-			else {
-				$i = "%-12s %-12s From:%s To:%s Size:%s\n";
-				printf "$i",
-       					$mail->{first_seen},
-       					$mail->{id},
-       					$mail->{from},
-       					$mail->{to}[0],
-       					$mail->{size};
-				$j = "\tto:%s Delay:%s Status:%s Relay:%s\n\tInfo:%s\n";
-				for $i ( 0..$#{ $mail->{info} } ) {
-                			printf "$j",
-                       				$mail->{to}[$i],
-                       				$mail->{delay}[$i],
-                       				$mail->{status}[$i],
-                       				$mail->{relay}[$i],
-                       				$mail->{info}[$i];
-				}
-			}
-		}
-	}
-	elsif ( $brief ) {
-		if ( $csv ) {
-			$i = "%s,%s,%s,From:%s,To:%s\n";
-		}
-		else {
-			$i = "%-12s %-11s %-10s From:%-25s  To:%-30s\n";
-		}
-		printf "$i",
-	       		$mail->{deleted_time},
-	       		$mail->{id},
-			$mail->{status}[$#{$mail->{status}}],
-	       		$mail->{from},
-	       		$mail->{to}[0];
-	}
-	else {
-		if ( $csv ) {
-			$i = "%s,%s,%s,From:%s,To:%s,Sent to:%s\n";
-		}
-		else {
-			$i = "%-12s %-10s %-10s From:%-25s To:%-30s Sent to: %s\n";
-		}
-		printf "$i",
-	       		$mail->{deleted_time},
-	       		$mail->{id},
-			$mail->{status}[$#{$mail->{status}}],
-	       		$mail->{from},
-	       		$mail->{to}[0],
-			$mail->{relay}[$#{$mail->{relay}}],
-	}
+	PrintMailInfo_csv() if $csv;
+	PrintMailInfo_visual() unless $csv;
 }
 
 
@@ -189,17 +264,19 @@ sub parsepostfix {
 
 	#Check if mail id is a mail requeued from Mailscanner switching id to original mail-id..
 	if ( defined( $mapper->{$id} ) ) { 
+		$j = $id; # Saving the original id if we want to delete the entry below.
 		$id = $mapper->{$id};
 	 }
 
 	# Find message or create new hash
-	my $mail = $msg->{$id} ||= { id => $id, time => $1, server => $2, to => [ ] };
+	$mail = $msg->{$id} ||= { id => $id, time => $1, server => $2, to => [ ] };
 
 	if ( $cmd eq 'qmgr' ) {
 		if ( $line =~ /^removed$/ ) {
 			$mail->{deleted_time} = $time;
-			&printmailinfo( $mail );
+			printmailinfo( $mail );
 			delete $msg->{$id};
+			delete $mapper->{$j}; # Deleting mapper id as well.
 		} 
 		else {
 			#print "\tDebug: Parsing: <$line>\n" if $debug;
@@ -224,17 +301,18 @@ sub parsepostfix {
 			#}
 			push @{ $mail->{to}  }, $1;# if $j ne 'TRUE';
 		}
+
 		push @{ $mail->{delay}  }, $1 if $line =~ /delay=(\d+)/;
 		push @{ $mail->{delay}  }, $1 if $line =~ /delay=(\d+\.\d+)/;
 		push @{ $mail->{status} }, $1 if $line =~ /status=(\w+)/;
-
 		push @{ $mail->{relay} }, $1 if $line =~ /relay=(.*?), /;
+
+		# Adjust relay info to "thrash" if mail is bounced.
 		if ( defined( $mail->{status}[$#{$mail->{status}}] ) ) {
 			if ( $mail->{status}[$#{$mail->{status}}] =~ /bounced/ ) {
 				$mail->{relay}[$#{$mail->{relay}}] = 'thrashcan';
 			}
 		}
-
 		push @{ $mail->{info}   }, $1 if $line =~ /(\(.*\)$)/;
 	}
 }
@@ -261,9 +339,9 @@ sub parsemailscanner {
 		$msg->{$id}->{status} = ["$msg->{$id}->{spam_status}"] if defined( $msg->{$id}->{spam_status} );
 		$msg->{$id}->{info} = ['none'];
 		$msg->{$id}->{deleted_time} = "$time";
-		&printmailinfo( $msg->{$id} );
+		printmailinfo( $msg->{$id} );
 		delete $msg->{$id};
-
+		delete $mapper->{$id}; # Deleting mapper id as well.
 	}
 	elsif ( $line =~ /^Requeue: ([0-9A-F]+)\.[0-9A-F]+ to ([0-9A-F]+)$/ ) {
 		$mapper->{$2} = $1;
@@ -276,16 +354,16 @@ sub ParseLine {
 	# Check if line is in a known Postfix format:
 	if ( $_[0] =~ /^(\w\w\w\s{1,2}\d{1,2} \d\d:\d\d:\d\d) (\w+) postfix\/(\w+)\[\d+\]: ([0-9A-F]+): (.*)/ ) {
 		( $time, $server, $cmd, $id, $line ) = ( $1, $2, $3, $4, $5 );
-		#print "\tDebug: Parsing: <$_>\n" if $debug;
-		&parsepostfix( $_ );
+		print "\tDebug: Parsing: <$_>\n" if $Xdebug;
+		parsepostfix( $_ );
 	}
 
 	# Check if line is in a known Mailscanner format:
 	elsif ( $_[0] =~ /^(\w\w\w\s{1,2}\d{1,2} \d\d:\d\d:\d\d) (\w+) MailScanner\[\d+\]: (.*)/ ) {
 		( $time, $server, $line ) = ( $1, $2 ,$3 );
 		$mailscanner = 1;
-		#print "\tDebug: Parsing: <$_>\n" if $debug;
-		&parsemailscanner( $_ );
+		print "\tDebug: Parsing: <$_>\n" if $Xdebug;
+		parsemailscanner( $_ );
 	}
 }
 
@@ -296,7 +374,7 @@ sub readfile {
         open LOGFILE, $_[0];
 
         while (<LOGFILE>) {
-		&ParseLine( $_ );
+		ParseLine( $_ );
         }
         close (LOGFILE);
 }
@@ -309,7 +387,7 @@ sub readbzfile {
         my $LOGFILE = bzopen($_[0],"r") or die "File not found.. $errno";
 
         while ($LOGFILE->bzreadline(my $line) > 0) {
-		&ParseLine( $line );
+		ParseLine( $line );
         }
         warn "Error reading from $_[0]: $errno\n" if ($errno ne "OK (0)") ;
 
@@ -324,8 +402,7 @@ sub readgzfile {
         my $gz = gzopen($_[0], "r") or die "Cannot open $_[0]: $errno\n" ;
    
         while ($gz->gzreadline( $line ) > 0) {
-		#print "line: $line\n";		
-		&ParseLine( $line );
+		ParseLine( $line );
         }
         $gz->gzclose() ;
 }
@@ -334,6 +411,8 @@ sub readgzfile {
 ####################################################################################
 # Ok, Let's start the show!
 
+# Read default config;
+#ReadConfigFile();
 
 # If you want me to search logfiles:
 if ( defined( $logfile ) ) {
@@ -341,9 +420,9 @@ if ( defined( $logfile ) ) {
 		$i = $NumberOfFiles - $i;  # We want to parse oldest logs first.
 		print "Reading $path$logfile.$i" if $debug;
 
-		if ( -e "$path$logfile.$i.gz" ) {  print ".gz\n" if $debug; &readgzfile( "$path$logfile.$i.gz" ); }
-		elsif ( -e "$path$logfile.$i.bz" ) { print ".bz2\n" if $debug; &readbzfile( "$path$logfile.$i.bz2" );  }
-		elsif ( -e "$path$logfile.$i" ) { print "\n" if $debug; &readfile( "$path$logfile.$i" ); }
+		if ( -e "$path$logfile.$i.gz" ) {  print ".gz\n" if $debug; readgzfile( "$path$logfile.$i.gz" ); }
+		elsif ( -e "$path$logfile.$i.bz" ) { print ".bz2\n" if $debug; readbzfile( "$path$logfile.$i.bz2" );  }
+		elsif ( -e "$path$logfile.$i" ) { print "\n" if $debug; readfile( "$path$logfile.$i" ); }
 		else { print "Warning!  File not found: $path$logfile.$i(or .gz or .bz2)!\n"; }
 	}
 	print "Reading $path$logfile\n" if $debug;
