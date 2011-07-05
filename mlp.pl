@@ -229,16 +229,16 @@ sub printmailinfo {
 	return  if ( $address ne 'all' && ( $mail->{from} !~ /$address/i && $j !~ /$address/i && $mail->{id} !~ /$address/ ) );
 
 	# Filling the holes of incomplete records...
-	if ( ! defined( $mail->{id} )                ) { $mail->{id}           =  '<!>'  }
-	if ( ! defined( $mail->{first_seen} )        ) { $mail->{first_seen}   =  '<!>'  }
-	if ( ! defined( $mail->{deleted_time} )      ) { $mail->{deleted_time} =  '<!>'  }
-	if ( ! defined( $mail->{from} )              ) { $mail->{from}         =  '<!>'  }
-	if ( ! defined( $mail->{to} )                ) { $mail->{to}           = ['<!>'] }
-	if ( ! defined( $mail->{size} )              ) { $mail->{size}         =  '<!>'  }
-	if ( ! defined( $mail->{delay} )             ) { $mail->{delay}        = ['<!>'] }
-	if ( ! defined( $mail->{status} )            ) { $mail->{status}       = ['<!>'] }
-	if ( ! defined( $mail->{relay} )             ) { $mail->{relay}        = ['<!>'] }
-	if ( ! defined( $mail->{info} )              ) { $mail->{info}         = ['<!>'] }
+	if ( ! defined( $mail->{id} )           ) { $mail->{id}           =  '<!>'  }
+	if ( ! defined( $mail->{first_seen} )   ) { $mail->{first_seen}   =  '<!>'  }
+	if ( ! defined( $mail->{deleted_time} ) ) { $mail->{deleted_time} =  '<!>'  }
+	if ( ! defined( $mail->{from} )         ) { $mail->{from}         =  '<!>'  }
+	if ( ! defined( $mail->{to} )           ) { $mail->{to}           = ['<!>'] }
+	if ( ! defined( $mail->{size} )         ) { $mail->{size}         =  '<!>'  }
+	if ( ! defined( $mail->{delay} )        ) { $mail->{delay}        = ['<!>'] }
+	if ( ! defined( $mail->{status} )       ) { $mail->{status}       = ['<!>'] }
+	if ( ! defined( $mail->{relay} )        ) { $mail->{relay}        = ['<!>'] }
+	if ( ! defined( $mail->{info} )         ) { $mail->{info}         = ['<!>'] }
 
 	if ( defined( $mail->{mailscanner} ) ) {
 		if ( ! defined( $mail->{spam_status} )       ) { $mail->{spam_status}         = '<!>' }
