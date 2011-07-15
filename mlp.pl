@@ -20,11 +20,12 @@ my $col_from     = 'WHITE';
 my $col_to       = 'WHITE';
 my $col_id       = 'BLUE';
 my $col_size     = 'BLUE';
-my $col_info     = 'BLUE';
+my $col_info     = 'RESET BLUE';
 #my $col_status   = 'GREEN';
 my $col_bounced  = 'RED';
 my $col_sent  = 'GREEN';
-my $col_is_spam  = 'BOLD RED';
+my $col_spam  = 'BOLD RED';
+my $col_notspam  = 'GREEN';
 my $col_quarantine  = 'BOLD RED';
 
 
@@ -149,7 +150,9 @@ sub PrintMailInfo_csv() {
 
 sub checkstatuscolor {
 	return $col_bounced if $_[0] =~ /bounced/;
-	return $col_sent if $_[0] =~ /sent/;
+	return $col_sent    if $_[0] =~ /sent/;
+	return $col_spam    if $_[0] =~ /is spam/;
+	return $col_notspam if $_[0] =~ /is not spam/;
 	return 'MAGENTA';
 }
 
@@ -160,63 +163,49 @@ sub PrintMailInfo_visual {
 	my $to = join( ", ", @{ $mail->{to} } );
 	if ( $to eq '' ) { $to = '<>'; }
 
+	print "!!!$#{$mail->{status}}!!!\n";
 	my $col_mystatus = checkstatuscolor( $mail->{status}[$#{$mail->{status}}] );
 
-	if ( defined( $mail->{mailscanner} ) ) {
-		if ( $verbose ) {
-			$i = "%-12s %-12s From:%s To:%s Size %s\n\tSpam stat:%s, score:%s, required:%s\n\tchecks:%.120s\n";
-			printf "$i", $mail->{first_seen}, $mail->{id}, $mail->{from}, $mail->{to}[0], $mail->{size},
-			       $mail->{spam_status}, $mail->{spam_score}, $mail->{spam_score_required}, $mail->{spam_score_detail};
+	print color "$col_time" if $color; printf "%-12s", $mail->{deleted_time};
+	unless( $brief ) { print color "$col_id" if $color; printf " %-12s", $mail->{id}; }
 
-			$j = "\tto:%s Delay:%s Status:%s Relay:%s\n\tInfo:%s\n";
-			for $i ( 0..$#{ $mail->{info} } ) {
-				printf "$j",
-					$mail->{to}[$i], $mail->{delay}[$i], $mail->{status}[$i], $mail->{relay}[$i], $mail->{info}[$i];
+        if ( $verbose ) {
+		print color "$col_from" if $color; printf " From:%s", $mail->{from};
+		print color "$col_size" if $color; printf " Size:%s\n", $mail->{size}; 
+
+		if ( defined( $mail->{mailscanner} ) ) {
+			if ( $color ) {
+				my $col_myspamstatus = checkstatuscolor( $mail->{spam_status} );
+				print color "$col_myspamstatus";
 			}
+			printf "\tSpam stat:'%s' score:%s required:%s\n", 
+				$mail->{spam_status}, $mail->{spam_score}, $mail->{spam_score_required};
+
+			print color "$col_info" if $color;
+			printf "\tchecks:%.120s\n", $mail->{spam_score_detail};
 		}
-		elsif ( $brief ) {
-			$i = "%-12s %-11s %-10s From:%-25s  To:%-30s\n";
-			printf "$i",
-			       $mail->{deleted_time}, $mail->{id}, $mail->{status}[$#{$mail->{status}}],
-			       $mail->{from}, $mail->{to}[0];
-		}
-		else {
-			$i = "%-12s %-10s %-10s From:%-25s To:%-30s Sent to: %s\n";
-			printf "$i",
-			       $mail->{deleted_time}, $mail->{id}, $mail->{status}[$#{$mail->{status}}], $mail->{from},
-			       $mail->{to}[0], $mail->{relay}[$#{$mail->{relay}}],
-		}
+
+        	for $i ( 0..$#{ $mail->{info} } ) {
+			print color "$col_to"       if $color; printf "\tto:%s", $mail->{to}[$i];
+			print color "$col_info"     if $color; printf " Delay:%s", $mail->{delay}[$i];
+
+			$col_mystatus = checkstatuscolor( $mail->{status}[$i] );
+			print color "$col_mystatus" if $color; printf " Status:%s", $mail->{status}[$i];
+
+			print color "$col_info"     if $color;
+			printf " Sent to:%s\n\tInfo:%s\n", $mail->{relay}[$i], $mail->{info}[$i];
+        	}
 	}
-        else {	# if NOT Mailscanner..
-		print color "$col_time" if $color; printf "%-12s", $mail->{deleted_time};
-		unless( $brief ) { print color "$col_id"   if $color; printf " %-12s", $mail->{id}; }
-
-                if ( $verbose ) {
-			print color "$col_from" if $color; printf " From:%s", $mail->{from};
-			print color "$col_size" if $color; printf " Size:%s\n", $mail->{size}; 
-
-                        for $i ( 0..$#{ $mail->{info} } ) {
-				print color "$col_to"       if $color; printf "\tto:%s", $mail->{to}[$i];
-				print color "$col_info"     if $color; printf " Delay:%s", $mail->{delay}[$i];
-
-				$col_mystatus = checkstatuscolor( $mail->{status}[$i] );
-				print color "$col_mystatus" if $color; printf " Status:%s", $mail->{status}[$i];
-
-				print color "$col_info"     if $color;
-				printf " Sent to:%s\n\tInfo:%s\n", $mail->{relay}[$i], $mail->{info}[$i];
-                        }
-                }
-                else {
-			print color "$col_mystatus" if $color; printf " Status:%s", $mail->{status}[$#{$mail->{status}}];
-			print color "$col_from"     if $color; printf " From:%s", $mail->{from};
-			print color "$col_to"       if $color; printf " To:%s", $to;
-                }
-                unless ( $brief || $verbose ) {
-			print color "$col_info"    if $color;
-			printf " Sent to:%s", $mail->{relay}[$#{$mail->{relay}}];
-                }
-		print "\n";
+        else {
+		print color "$col_mystatus" if $color; printf " Status:%s", $mail->{status}[$#{$mail->{status}}];
+		print color "$col_from"     if $color; printf " From:%s", $mail->{from};
+		print color "$col_to"       if $color; printf " To:%s", $to;
         }
+        unless ( $brief || $verbose ) {
+		print color "$col_info"    if $color;
+		printf " Sent to:%s", $mail->{relay}[$#{$mail->{relay}}];
+        }
+	print "\n";
 }
 
 
@@ -286,16 +275,9 @@ sub parsepostfix {
 		$mail->{from} = $1 if $line =~ /from=<([^>]+)>/;
 		push @{ $mail->{to} }, $1 if $line =~/to=<([^>]+)>/;
 	}
-	elsif ( $cmd eq 'virtual' || $cmd eq 'smtp' || $cmd eq 'error' ) {
-		if ( $line =~/to=<([^>]+)>/ ) {
-			#$j = '';
-			# All this is to avoid duplicate recepients..
-			#for $i ( 0..$#{$mail->{to}} ) {
-			#	$j = 'TRUE' if $mail->{to}[$i] eq $1;
-			#}
-			push @{ $mail->{to}  }, $1;# if $j ne 'TRUE';
-		}
-
+	#elsif ( $cmd eq 'virtual' || $cmd eq 'smtp' || $cmd eq 'error' ) {
+	elsif ( $cmd =~ /(virtual|smtp|error|local)/) {
+		push @{ $mail->{to}  }, $1 if $line =~/to=<([^>]+)>/;
 		push @{ $mail->{delay}  }, $1 if $line =~ /delay=(\d+)/;
 		push @{ $mail->{delay}  }, $1 if $line =~ /delay=(\d+\.\d+)/;
 		push @{ $mail->{status} }, $1 if $line =~ /status=(\w+)/;
@@ -323,8 +305,15 @@ sub parsemailscanner {
 	if ( $line =~ /\((.*\@.*)\) to .* (is not spam|is spam|is too big|is whitelisted|is blacklisted)/ ) {
 		$msg->{$id}->{from} = $1;
 		$msg->{$id}->{spam_status} = $2;
-		( $msg->{$id}->{spam_score}, $msg->{$id}->{spam_score_required}, $msg->{$id}->{spam_score_detail} ) = ( $1, $2, $3 ) if 
-			$line =~ /score=(-?\d+\.\d+), required (\d+.*?), (.*)\)$/;
+	
+		$msg->{$id}->{spam_score} = $1 if $line =~ /score=(-?(\d+\.\d+|\d)),/;
+		$msg->{$id}->{spam_score_required} = $1 if $line =~ /required (\d+.*?)/;
+		if ( $line =~ /required \d+.*?, (.*)\)$/ ) {
+			$msg->{$id}->{spam_score_detail}  = $1;
+		}
+		else { 
+			$msg->{$id}->{spam_score_detail} = 'none';
+		}
 	}
 	elsif ( $line =~ /Spam Actions: message .* actions are store$/ ) {
 		$msg->{$id}->{relay} = ['Quarantine'];
