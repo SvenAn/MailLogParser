@@ -14,19 +14,21 @@ use Term::ANSIColor;
 
 
 # Default colors
-my $col_headline = 'YELLOW';
-my $col_time     = 'WHITE';
-my $col_from     = 'WHITE';
-my $col_to       = 'WHITE';
-my $col_id       = 'BLUE';
-my $col_size     = 'BLUE';
-my $col_info     = 'RESET BLUE';
-#my $col_status   = 'GREEN';
-my $col_bounced  = 'RED';
-my $col_sent  = 'GREEN';
-my $col_spam  = 'BOLD RED';
-my $col_notspam  = 'GREEN';
-my $col_quarantine  = 'BOLD RED';
+my $col = {
+	headline => 'YELLOW',
+	time     => 'WHITE',
+	from     => 'WHITE',
+	to       => 'WHITE',
+	id       => 'BLUE',
+	size     => 'BLUE',
+	info     => 'RESET BLUE',
+	bounced  => 'RED',
+	reject   => 'BOLD RED',
+	sent   	 => 'GREEN',
+	spam     => 'BOLD RED',
+	notspam  => 'GREEN',
+	quarantine  => 'BOLD RED'
+};
 
 
 
@@ -148,10 +150,11 @@ sub PrintMailInfo_csv() {
 }
 
 sub checkstatuscolor {
-	return $col_bounced if $_[0] =~ /bounced/;
-	return $col_sent    if $_[0] =~ /sent/;
-	return $col_spam    if $_[0] =~ /is spam/;
-	return $col_notspam if $_[0] =~ /is not spam/;
+	return $col->{bounced} if $_[0] =~ /bounced/;
+	return $col->{sent}    if $_[0] =~ /sent/;
+	return $col->{spam}    if $_[0] =~ /is spam/;
+	return $col->{notspam} if $_[0] =~ /is not spam/;
+	return $col->{reject}  if $_[0] =~ /reject/;
 	return 'MAGENTA';
 }
 
@@ -162,45 +165,48 @@ sub PrintMailInfo_visual {
 	my $to = join( ", ", @{ $msg->{$id}->{to} } );
 	if ( $to eq '' ) { $to = '<>'; }
 
-	my $col_mystatus = checkstatuscolor( $msg->{$id}->{status}[$#{$msg->{$id}->{status}}] ) if $#{$msg->{$id}->{status}} > -1;
+	$col->{mystatus} = checkstatuscolor( $msg->{$id}->{status}[$#{$msg->{$id}->{status}}] ) if $#{$msg->{$id}->{status}} > -1;
 
-	print color "$col_time" if $color; printf "%-12s", $msg->{$id}->{deleted_time};
-	unless( $brief ) { print color "$col_id" if $color; printf " %-12s", $msg->{$id}->{id}; }
+	print color "$col->{time}" if $color; printf "%-12s", $msg->{$id}->{deleted_time};
+	unless( $brief ) { print color "$col->{id}" if $color; printf " %-12s", $msg->{$id}->{id}; }
 
         if ( $verbose ) {
-		print color "$col_from" if $color; printf " From:%s", $msg->{$id}->{from};
-		print color "$col_size" if $color; printf " Size:%s\n", $msg->{$id}->{size}; 
+		print color "$col->{from}" if $color; printf " From:%s", $msg->{$id}->{from};
+		print color "$col->{size}" if $color; printf " Size:%s\n", $msg->{$id}->{size}; 
 
 		if ( defined( $msg->{$id}->{mailscanner} ) ) {
 			if ( $color ) {
-				my $col_myspamstatus = checkstatuscolor( $msg->{$id}->{spam_status} );
-				print color "$col_myspamstatus";
+				my $col->{myspamstatus} = checkstatuscolor( $msg->{$id}->{spam_status} );
+				print color "$col->{myspamstatus}";
 			}
 			printf "\tSpam stat:'%s' score:%s required:%s\n", 
 				$msg->{$id}->{spam_status}, $msg->{$id}->{spam_score}, $msg->{$id}->{spam_score_required};
 
-			print color "$col_info" if $color;
+			print color "$col->{info}" if $color;
 			printf "\tchecks:%.120s\n", $msg->{$id}->{spam_score_detail};
 		}
 
+		#Hack to remove extra recipient info only needed if mail is rejected og sent to quarantine:
+		shift( @{ $msg->{$id}->{to} } ) if $#{ $msg->{$id}->{to} } > $#{ $msg->{$id}->{status} };
+
         	for $i ( 0..$#{ $msg->{$id}->{info} } ) {
-			print color "$col_to"       if $color; printf "\tto:%s", $msg->{$id}->{to}[$i];
-			print color "$col_info"     if $color; printf " Delay:%s", $msg->{$id}->{delay}[$i];
+			print color "$col->{to}"       if $color; printf "\tto:%s", $msg->{$id}->{to}[$i];
+			print color "$col->{info}"     if $color; printf " Delay:%s", $msg->{$id}->{delay}[$i];
 
-			$col_mystatus = checkstatuscolor( $msg->{$id}->{status}[$i] );
-			print color "$col_mystatus" if $color; printf " Status:%s", $msg->{$id}->{status}[$i];
+			$col->{mystatus} = checkstatuscolor( $msg->{$id}->{status}[$i] );
+			print color "$col->{mystatus}" if $color; printf " Status:%s", $msg->{$id}->{status}[$i];
 
-			print color "$col_info"     if $color;
+			print color "$col->{info}"     if $color;
 			printf " Sent to:%s\n\tInfo:%s\n", $msg->{$id}->{relay}[$i], $msg->{$id}->{info}[$i];
         	}
 	}
         else {
-		print color "$col_mystatus" if $color; printf " Status:%s", $msg->{$id}->{status}[$#{$msg->{$id}->{status}}];
-		print color "$col_from"     if $color; printf " From:%s", $msg->{$id}->{from};
-		print color "$col_to"       if $color; printf " To:%s", $to;
+		print color "$col->{mystatus}" if $color; printf " Status:%s", $msg->{$id}->{status}[$#{$msg->{$id}->{status}}];
+		print color "$col->{from}"     if $color; printf " From:%s", $msg->{$id}->{from};
+		print color "$col->{to}"       if $color; printf " To:%s", $to;
         }
         unless ( $brief || $verbose ) {
-		print color "$col_info"    if $color;
+		print color "$col->{info}"    if $color;
 		printf " Sent to:%s", $msg->{$id}->{relay}[$#{$msg->{$id}->{relay}}];
         }
 	print "\n";
@@ -218,29 +224,31 @@ sub printmailinfo {
 
 	# Check if mail matches optional $address and return if not..
 	$j = join( ", ", @{ $msg->{$id}->{to} } );
-	return  if ( $address ne 'all' && ( $msg->{$id}->{from} !~ /$address/i && $j !~ /$address/i && $msg->{$id}->{id} !~ /$address/ ) );
+	if ( $address eq 'all' || $msg->{$id}->{from} =~ /$address/i || $j =~ /$address/i || $msg->{$id}->{id} =~ /$address/ ) { 
 
-	if ( ! defined( $msg->{$id}->{first_seen} )   ) { $msg->{$id}->{first_seen}   =  '<!>'  }
-	if ( ! defined( $msg->{$id}->{deleted_time} ) ) { $msg->{$id}->{deleted_time} =  '<!>'  }
-	if ( ! defined( $msg->{$id}->{size} )         ) { $msg->{$id}->{size}         =  '<!>'  }
-	if ( ! defined( $msg->{$id}->{delay} )        ) { $msg->{$id}->{delay}        = ['<!>'] }
-	if ( ! defined( $msg->{$id}->{status} )       ) { $msg->{$id}->{status}       = ['<!>'] }
-	if ( ! defined( $msg->{$id}->{relay} )        ) { $msg->{$id}->{relay}        = ['<!>'] }
-	if ( ! defined( $msg->{$id}->{info} )         ) { $msg->{$id}->{info}         = ['<!>'] }
+		if ( ! defined( $msg->{$id}->{first_seen} )   ) { $msg->{$id}->{first_seen}   =  '<!>'  }
+		if ( ! defined( $msg->{$id}->{deleted_time} ) ) { $msg->{$id}->{deleted_time} =  '<!>'  }
+		if ( ! defined( $msg->{$id}->{size} )         ) { $msg->{$id}->{size}         =  '<!>'  }
+		if ( ! defined( $msg->{$id}->{delay} )        ) { $msg->{$id}->{delay}        = ['<!>'] }
+		if ( ! defined( $msg->{$id}->{status} )       ) { $msg->{$id}->{status}       = ['<!>'] }
+		if ( ! defined( $msg->{$id}->{relay} )        ) { $msg->{$id}->{relay}        = ['<!>'] }
+		if ( ! defined( $msg->{$id}->{info} )         ) { $msg->{$id}->{info}         = ['<!>'] }
 
-	if ( defined( $msg->{$id}->{mailscanner} ) ) {
-		if ( ! defined( $msg->{$id}->{spam_status} )       ) { $msg->{$id}->{spam_status}         = '<!>' }
-		if ( ! defined( $msg->{$id}->{spam_score} )        ) { $msg->{$id}->{spam_score}          = '<!>' }
-		if ( ! defined( $msg->{$id}->{spam_score_required})) { $msg->{$id}->{spam_score_required} = '<!>' }
-		if ( ! defined( $msg->{$id}->{spam_score_detail} ) ) { $msg->{$id}->{spam_score_detail}   = '<!>' }
+		if ( defined( $msg->{$id}->{mailscanner} ) ) {
+			if ( ! defined( $msg->{$id}->{spam_status} )       ) { $msg->{$id}->{spam_status}         = '<!>' }
+			if ( ! defined( $msg->{$id}->{spam_score} )        ) { $msg->{$id}->{spam_score}          = '<!>' }
+			if ( ! defined( $msg->{$id}->{spam_score_required})) { $msg->{$id}->{spam_score_required} = '<!>' }
+			if ( ! defined( $msg->{$id}->{spam_score_detail} ) ) { $msg->{$id}->{spam_score_detail}   = '<!>' }
+		}
+
+		PrintMailInfo_csv() if $csv;
+		PrintMailInfo_visual() unless $csv;
+		$entries++;
 	}
 
-	PrintMailInfo_csv() if $csv;
-	PrintMailInfo_visual() unless $csv;
-
+#	for ( keys %{$msg->{$id}} ) { delete $msg->{$id}->{$_}; }
 	delete $msg->{$id};
-	delete $mapper->{$mapperid}; # Deleting mapper id as well.
-	$entries++;
+	delete $mapper->{$mapperid} if defined( $mapperid ); # Deleting mapper id as well.
 }
 
 
@@ -273,7 +281,19 @@ sub parsepostfix {
 		$msg->{$id}->{first_seen} = $time;
 		$msg->{$id}->{msgid} = $1 if $line =~ /^message-id=(<[^>]+>)/;
 		$msg->{$id}->{from} = $1 if $line =~ /from=<([^>]+)>/;
-		#push @{ $msg->{$id}->{to} }, $1 if $line =~/to=<([^>]+)>/;
+		push @{ $msg->{$id}->{to} }, $1 if $line =~/to=<([^>]+)>/;
+	}
+	elsif ( $cmd eq 'smtpd'  && $line =~ /^(reject):/ ) {
+		push @{ $msg->{$id}->{status} }, $1;
+		push @{ $msg->{$id}->{to}     }, $1 if $line =~/to=<([^>]+)>/;
+		push @{ $msg->{$id}->{info}   }, $1 if $line =~ /RCPT from .*\]: (\d{3} \d\.\d\.\d .*);/;
+		push @{ $msg->{$id}->{delay} }, 'none';
+		push @{ $msg->{$id}->{relay} }, 'trash';
+		$msg->{$id}->{deleted_time} = $time;
+		$msg->{$id}->{from} = $1 if $line =~ /from=<([^>]+)>/;
+		$msg->{$id}->{size} = 'unknown';
+		printmailinfo( $msg->{$id} ); 
+
 	}
 	elsif ( $cmd =~ /(virtual|smtp|error|local)/) {
 		push @{ $msg->{$id}->{to}  }, $1 if $line =~/to=<([^>]+)>/;
@@ -333,9 +353,9 @@ sub parsemailscanner {
 sub ParseLine {
 	$lines++;
 	# Check if line is in a known Postfix format:
-	if ( $_[0] =~ /^(\w\w\w\s{1,2}\d{1,2} \d\d:\d\d:\d\d) (\w+) postfix\/(\w+)\[\d+\]: ([0-9A-F]+): (.*)/ ) {
+	if ( $_[0] =~ /^(\w\w\w\s{1,2}\d{1,2} \d\d:\d\d:\d\d) (.*) postfix\/(\w+)\[\d+\]: ([0-9A-Z]+): (.*)/ ) {
 		( $time, $server, $cmd, $id, $line ) = ( $1, $2, $3, $4, $5 );
-		print "\tDebug: Parsing: <$_>\n" if $Xdebug;
+		print "\tDebug: Parsing: <$_>\n" if $debug;
 		parsepostfix( $_ );
 	}
 
@@ -396,7 +416,7 @@ sub readgzfile {
 unless ( $csv ) {
 	$starttime = time;
 
-	print color "$col_headline" if $color; 
+	print color "$col->{headline}" if $color; 
 	print "Reading log files..\n_____________________\n\n";
 }
 
@@ -428,7 +448,7 @@ else {
 
 unless ( $csv ) {
 	$endtime = time - $starttime;
-	print color "$col_headline" if $color;
+	print color "$col->{headline}" if $color;
 	print "_________________________________________________\n";
 	print "Done. $lines lines parsed in $endtime seconds. $entries entries found.\n" if ! $debug;
 	print color 'reset' if $color;
