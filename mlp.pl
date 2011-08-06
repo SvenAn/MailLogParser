@@ -60,6 +60,7 @@ eval {
 };
 unless($@) { $bz2_loaded = 1; print "Debug: Compress::Bzip2 loaded.\n" if $debug; }
 
+
 #Loading Compress::Zlib if module is present.
 my $gz_loaded;
 eval {
@@ -68,8 +69,9 @@ eval {
 };
 unless($@) { $gz_loaded = 1; print "Debug: Compress::Zlib loaded.\n" if $debug; }
 
+
 # All sorts of variables
-my ( $i, $j, $msg, $time, $server, $cmd, $id, $line, $Mailscanner, $mapper, $mapperid, $starttime, $endtime );
+my ( $i, $j, $msg, $time, $server, $cmd, $id, $line, $Mailscanner, $mapper, $mapperid, $starttime, $endtime, $postgreylist, $Postgrey );
 my ( $lines, $entries ) = 0;
 my @config;
 
@@ -100,12 +102,13 @@ sub ReadConfigFile() {
 # Printing info in csv format.
 sub PrintMailInfo_csv() {
 
-	$msg->{$id}->{to} = join( ";", @{ $msg->{$id}->{to} } );
+	$msg->{$id}->{to}     = join( ";", @{ $msg->{$id}->{to} } );
 	if ( $msg->{$id}->{to} eq '' ) { $msg->{$id}->{to} = '<>'; }
-	$msg->{$id}->{delay} = join( ";", @{ $msg->{$id}->{delay} } );
-	$msg->{$id}->{relay} = join( ";", @{ $msg->{$id}->{relay} } );
+
+	$msg->{$id}->{delay}  = join( ";", @{ $msg->{$id}->{delay}  } );
+	$msg->{$id}->{relay}  = join( ";", @{ $msg->{$id}->{relay}  } );
 	$msg->{$id}->{status} = join( ";", @{ $msg->{$id}->{status} } );
-	$msg->{$id}->{info} = join( ";", @{ $msg->{$id}->{info} } );
+	$msg->{$id}->{info}   = join( ";", @{ $msg->{$id}->{info}   } );
 
 	if ( defined( $msg->{$id}->{mailscanner} ) ) {
 		if ( $verbose ) {
@@ -158,6 +161,53 @@ sub checkstatuscolor {
 	return 'MAGENTA';
 }
 
+
+sub checkpostgreytriple { 
+	if ( defined ( $msg->{$id}->{from} ) && defined( $msg->{$id}->{to}[0] ) ) {
+		$i = "$msg->{$id}->{from}-$msg->{$id}->{to}[0]";
+	}
+	if ( defined( $postgreylist->{$i}->{delay} ) ) {
+		return $i;
+	}
+	else {
+		return "not ok";
+	}
+}
+
+
+sub formattime {
+	my ( $dayexpr, $hourexpr, $minexpr, $secexpr );
+	$i = $_[0];
+
+	my $days = int( $i / 86400 );
+	$i = $i - ( $days * 86400 );
+
+	my $hours = int( $i / 3600 );
+	$i = $i - ( $hours * 3600 );
+
+	my $mins = int( $i / 60 );
+
+	my $secs = $i - ( $mins * 60 );
+
+	if ( $days == 1 ) { $dayexpr = "day" }
+	else { $dayexpr = "days" }
+	
+	if ( $hours == 1 ) { $hourexpr = "hour" }
+	else { $hourexpr = "hours" }
+
+	if ( $mins == 1 ) { $minexpr = "minute" }
+	else { $minexpr = "minutes" }
+
+	if ( $secs == 1 ) { $secexpr = "second" }
+	else { $secexpr = "seconds" }
+
+	if ( $days > 0 )     { return "$days $dayexpr, $hours $hourexpr, $mins $minexpr, $secs $secexpr" }
+	elsif ( $hours > 0 ) { return "$hours $hourexpr, $mins $minexpr, $secs $secexpr" }
+	elsif ( $mins  > 0 ) { return "$mins $minexpr, $secs $secexpr" }
+	else { return "$secs $secexpr" }
+}
+
+
 ###
 # Printing the result in chosen format.
 sub PrintMailInfo_visual {
@@ -173,6 +223,11 @@ sub PrintMailInfo_visual {
         if ( $verbose ) {
 		print color "$col->{from}" if $color; printf " From:%s", $msg->{$id}->{from};
 		print color "$col->{size}" if $color; printf " Size:%s\n", $msg->{$id}->{size}; 
+
+		unless ( checkpostgreytriple() eq "not ok" ) { 
+			$j = formattime( $postgreylist->{$i}->{delay} );
+			print "\tPostgrey delay: $j.\n";
+		}
 
 		if ( defined( $msg->{$id}->{mailscanner} ) ) {
 			if ( $color ) {
@@ -190,8 +245,8 @@ sub PrintMailInfo_visual {
 		shift( @{ $msg->{$id}->{to} } ) if $#{ $msg->{$id}->{to} } > $#{ $msg->{$id}->{status} };
 
         	for $i ( 0..$#{ $msg->{$id}->{info} } ) {
-			print color "$col->{to}"       if $color; printf "\tto:%s", $msg->{$id}->{to}[$i];
-			print color "$col->{info}"     if $color; printf " Delay:%s", $msg->{$id}->{delay}[$i];
+			print color "$col->{to}"   if $color; printf "\tto:%s", $msg->{$id}->{to}[$i];
+			print color "$col->{info}" if $color; printf " Delay:%s", formattime( $msg->{$id}->{delay}[$i] );
 
 			$col->{mystatus} = checkstatuscolor( $msg->{$id}->{status}[$i] );
 			print color "$col->{mystatus}" if $color; printf " Status:%s", $msg->{$id}->{status}[$i];
@@ -218,27 +273,27 @@ sub PrintMailInfo_visual {
 sub printmailinfo {
 
 	# Filling the holes of incomplete records...
-	if ( ! defined( $msg->{$id}->{from} )         ) { $msg->{$id}->{from}         =  '<!>'  }
-	if ( ! defined( $msg->{$id}->{to} )           ) { $msg->{$id}->{to}           = ['<!>'] }
-	if ( ! defined( $msg->{$id}->{id} )           ) { $msg->{$id}->{id}           =  '<!>'  }
+	unless ( defined( $msg->{$id}->{from} ) ) { $msg->{$id}->{from} =  '<!>'  }
+	unless ( defined( $msg->{$id}->{to} )   ) { $msg->{$id}->{to}   = ['<!>'] }
+	unless ( defined( $msg->{$id}->{id} )   ) { $msg->{$id}->{id}   =  '<!>'  }
 
 	# Check if mail matches optional $address and return if not..
 	$j = join( ", ", @{ $msg->{$id}->{to} } );
 	if ( $address eq 'all' || $msg->{$id}->{from} =~ /$address/i || $j =~ /$address/i || $msg->{$id}->{id} =~ /$address/ ) { 
 
-		if ( ! defined( $msg->{$id}->{first_seen} )   ) { $msg->{$id}->{first_seen}   =  '<!>'  }
-		if ( ! defined( $msg->{$id}->{deleted_time} ) ) { $msg->{$id}->{deleted_time} =  '<!>'  }
-		if ( ! defined( $msg->{$id}->{size} )         ) { $msg->{$id}->{size}         =  '<!>'  }
-		if ( ! defined( $msg->{$id}->{delay} )        ) { $msg->{$id}->{delay}        = ['<!>'] }
-		if ( ! defined( $msg->{$id}->{status} )       ) { $msg->{$id}->{status}       = ['<!>'] }
-		if ( ! defined( $msg->{$id}->{relay} )        ) { $msg->{$id}->{relay}        = ['<!>'] }
-		if ( ! defined( $msg->{$id}->{info} )         ) { $msg->{$id}->{info}         = ['<!>'] }
+		unless ( defined( $msg->{$id}->{first_seen} )   ) { $msg->{$id}->{first_seen}   =  '<!>'  }
+		unless ( defined( $msg->{$id}->{deleted_time} ) ) { $msg->{$id}->{deleted_time} =  '<!>'  }
+		unless ( defined( $msg->{$id}->{size} )         ) { $msg->{$id}->{size}         =  '<!>'  }
+		unless ( defined( $msg->{$id}->{delay} )        ) { $msg->{$id}->{delay}        = ['<!>'] }
+		unless ( defined( $msg->{$id}->{status} )       ) { $msg->{$id}->{status}       = ['<!>'] }
+		unless ( defined( $msg->{$id}->{relay} )        ) { $msg->{$id}->{relay}        = ['<!>'] }
+		unless ( defined( $msg->{$id}->{info} )         ) { $msg->{$id}->{info}         = ['<!>'] }
 
 		if ( defined( $msg->{$id}->{mailscanner} ) ) {
-			if ( ! defined( $msg->{$id}->{spam_status} )       ) { $msg->{$id}->{spam_status}         = '<!>' }
-			if ( ! defined( $msg->{$id}->{spam_score} )        ) { $msg->{$id}->{spam_score}          = '<!>' }
-			if ( ! defined( $msg->{$id}->{spam_score_required})) { $msg->{$id}->{spam_score_required} = '<!>' }
-			if ( ! defined( $msg->{$id}->{spam_score_detail} ) ) { $msg->{$id}->{spam_score_detail}   = '<!>' }
+			unless ( defined( $msg->{$id}->{spam_status} )       ) { $msg->{$id}->{spam_status}         = '<!>' }
+			unless ( defined( $msg->{$id}->{spam_score} )        ) { $msg->{$id}->{spam_score}          = '<!>' }
+			unless ( defined( $msg->{$id}->{spam_score_required})) { $msg->{$id}->{spam_score_required} = '<!>' }
+			unless ( defined( $msg->{$id}->{spam_score_detail} ) ) { $msg->{$id}->{spam_score_detail}   = '<!>' }
 		}
 
 		PrintMailInfo_csv() if $csv;
@@ -246,9 +301,12 @@ sub printmailinfo {
 		$entries++;
 	}
 
-#	for ( keys %{$msg->{$id}} ) { delete $msg->{$id}->{$_}; }
+	#After processing the mail we delete all traces of it...
+	unless ( checkpostgreytriple() eq "not ok" ) { 
+		delete $postgreylist->{$_};
+	}
 	delete $msg->{$id};
-	delete $mapper->{$mapperid} if defined( $mapperid ); # Deleting mapper id as well.
+	delete $mapper->{$mapperid} if defined( $mapperid );
 }
 
 
@@ -287,8 +345,8 @@ sub parsepostfix {
 		push @{ $msg->{$id}->{status} }, $1;
 		push @{ $msg->{$id}->{to}     }, $1 if $line =~/to=<([^>]+)>/;
 		push @{ $msg->{$id}->{info}   }, $1 if $line =~ /RCPT from .*\]: (\d{3} \d\.\d\.\d .*);/;
-		push @{ $msg->{$id}->{delay} }, 'none';
-		push @{ $msg->{$id}->{relay} }, 'trash';
+		push @{ $msg->{$id}->{delay} }, 0;
+		push @{ $msg->{$id}->{relay} }, 'Never received message.';
 		$msg->{$id}->{deleted_time} = $time;
 		$msg->{$id}->{from} = $1 if $line =~ /from=<([^>]+)>/;
 		$msg->{$id}->{size} = 'unknown';
@@ -338,7 +396,7 @@ sub parsemailscanner {
 	elsif ( $line =~ /Spam Actions: message .* actions are store$/ ) {
 		$msg->{$id}->{relay} = ['Quarantine'];
 		$msg->{$id}->{delay} = ['-'];
-		$msg->{$id}->{size} = '-';
+		$msg->{$id}->{size} = 'unknown';
 		$msg->{$id}->{status} = ["$msg->{$id}->{spam_status}"] if defined( $msg->{$id}->{spam_status} );
 		$msg->{$id}->{info} = ['none'];
 		$msg->{$id}->{deleted_time} = "$time";
@@ -350,12 +408,29 @@ sub parsemailscanner {
 }
 
 
+###
+# Parsing the postgrey log line extracting all necessary info into the mailbox hash.
+sub parsepostgrey {
+	if ( $line =~ /triplet found, delay=(\d+), client_name=(.*?), client_address=(.*?), sender=(.*?), recipient=(.*)$/ ) {
+		#$i = "$3-$4-$5";
+		$i = "$4-$5";
+		$postgreylist->{$i}->{time} = $time;
+		$postgreylist->{$i}->{delay} = $1;
+		$postgreylist->{$i}->{client_address} = $3;
+		$postgreylist->{$i}->{sender} = $4;
+		$postgreylist->{$i}->{recipient} = $5;
+#print "Got: $postgreylist->{$i}->{time}, $postgreylist->{$i}->{client_address}, $postgreylist->{$i}->{sender}, $postgreylist->{$i}->{recipient}!\n";
+#print "Got: $i\n";
+	}
+}
+
+
 sub ParseLine {
 	$lines++;
 	# Check if line is in a known Postfix format:
 	if ( $_[0] =~ /^(\w\w\w\s{1,2}\d{1,2} \d\d:\d\d:\d\d) (.*) postfix\/(\w+)\[\d+\]: ([0-9A-Z]+): (.*)/ ) {
 		( $time, $server, $cmd, $id, $line ) = ( $1, $2, $3, $4, $5 );
-		print "\tDebug: Parsing: <$_>\n" if $debug;
+		print "\tDebug: Parsing: <$_>\n" if $Xdebug;
 		parsepostfix( $_ );
 	}
 
@@ -365,6 +440,18 @@ sub ParseLine {
 		$Mailscanner = 1;
 		print "\tDebug: Parsing: <$_>\n" if $Xdebug;
 		parsemailscanner( $_ );
+	}
+
+	# Check if line is in a known Postgrey format:
+	elsif ( $_[0] =~ /^(\w\w\w\s{1,2}\d{1,2} \d\d:\d\d:\d\d) (\w+) postgrey\[\d+\]: (.*)/ ) {
+		( $time, $server, $line ) = ( $1, $2 ,$3 );
+		$Postgrey = 1;
+		print "\tDebug: Parsing: <$_>\n" if $Xdebug;
+		parsepostgrey( $_ );
+	}
+
+	else {
+		print "\tDebug: No known format: <$_>\n" if $Xdebug;
 	}
 }
 
@@ -411,7 +498,6 @@ sub readgzfile {
 
 ####################################################################################
 # Ok, Let's start the show!
-
 
 unless ( $csv ) {
 	$starttime = time;
