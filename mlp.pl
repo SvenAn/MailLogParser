@@ -15,24 +15,28 @@ use Term::ANSIColor;
 
 # Default colors
 my $col = {
-	headline => 'YELLOW',
-	time     => 'WHITE',
-	from     => 'WHITE',
-	to       => 'WHITE',
-	id       => 'BLUE',
-	size     => 'BLUE',
-	info     => 'RESET BLUE',
-	bounced  => 'RED',
-	reject   => 'BOLD RED',
-	sent   	 => 'GREEN',
-	spam     => 'BOLD RED',
-	notspam  => 'GREEN',
-	quarantine  => 'BOLD RED'
+	headline      => 'YELLOW',
+	time          => 'WHITE',
+	from          => 'WHITE',
+	to            => 'WHITE',
+	id            => 'BLUE',
+	size          => 'BLUE',
+	info          => 'BLUE',
+	shortdelay    => 'BLUE',
+	longdelay     => 'BOLD YELLOW',
+	bounced       => 'RED',
+	reject        => 'BOLD RED',
+	sent   	      => 'GREEN',
+	spam          => 'BOLD RED',
+	notspam       => 'GREEN',
+	quarantine    => 'BOLD RED'
 };
 
+while ( my ($key, $value) = each(%$col) ) {
+	unless ( $value =~ /^BOLD/ ) { $col->{$key} = "RESET $value"; };
+}
 
-
-my ( $verbose, $brief, $logfile, $help, $csv, $debug, $Xdebug, $color );
+my ( $verbose, $brief, $logfile, $help, $csv, $debug, $Xdebug, $color, $anonymize );
 &ReadConfigFile(); # Read default config before processing command line options;
 
 use Getopt::Long;
@@ -47,6 +51,7 @@ my $options = GetOptions ( "v|verbose"   => \$verbose,
                            "d|debug"     => \$debug,
                            "xd|xdebug"   => \$Xdebug,
                            "a|ansicolor" => \$color,
+                           "anonymize"   => \$anonymize,
                            "h|help"      => \$help
 );
 my $address = $ARGV[0] || 'all';
@@ -65,7 +70,7 @@ unless($@) { $bz2_loaded = 1; print "Debug: Compress::Bzip2 loaded.\n" if $debug
 my $gz_loaded;
 eval {
 	require Compress::Zlib;
-	#Compress::Zlib->import();
+	Compress::Zlib->import();
 };
 unless($@) { $gz_loaded = 1; print "Debug: Compress::Zlib loaded.\n" if $debug; }
 
@@ -74,11 +79,12 @@ unless($@) { $gz_loaded = 1; print "Debug: Compress::Zlib loaded.\n" if $debug; 
 my ( $i, $j, $msg, $time, $server, $cmd, $id, $line, $Mailscanner, $mapper, $mapperid, $starttime, $endtime, $postgreylist, $Postgrey );
 my ( $lines, $entries ) = 0;
 my @config;
+my $delaywarn = 600; #seconds..
 
 
 ###
 # Parcing configfiles.
-sub ParceConfig {
+sub parseconfig {
 #	$csv = 1;
 }
 
@@ -90,11 +96,12 @@ sub ReadConfigFile() {
 		open( CONF, "/etc/mlp.conf" ) || print "ERROR: Could not open /etc/mlp.conf!";
 		@config = <CONF>;
 		close( CONF );
-		ParceConfig();
+		parseconfig();
 	}
 	if ( -e "~.mlprc" ) {
 
 	}
+	parseconfig();
 }
 
 
@@ -179,6 +186,8 @@ sub formattime {
 	my ( $dayexpr, $hourexpr, $minexpr, $secexpr );
 	$i = $_[0];
 
+	if ( $i !~ /^[\d|\.]+$/ ) { return $i };
+
 	my $days = int( $i / 86400 );
 	$i = $i - ( $days * 86400 );
 
@@ -221,7 +230,10 @@ sub PrintMailInfo_visual {
 	unless( $brief ) { print color "$col->{id}" if $color; printf " %-12s", $msg->{$id}->{id}; }
 
         if ( $verbose ) {
-		print color "$col->{from}" if $color; printf " From:%s", $msg->{$id}->{from};
+		print color "$col->{from}" if $color; 
+		if ( $anonymize ) { printf " From:%s", 'sender@source.org' }
+		else { printf " From:%s", $msg->{$id}->{from} };
+
 		print color "$col->{size}" if $color; printf " Size:%s\n", $msg->{$id}->{size}; 
 
 		unless ( checkpostgreytriple() eq "not ok" ) { 
@@ -245,8 +257,16 @@ sub PrintMailInfo_visual {
 		shift( @{ $msg->{$id}->{to} } ) if $#{ $msg->{$id}->{to} } > $#{ $msg->{$id}->{status} };
 
         	for $i ( 0..$#{ $msg->{$id}->{info} } ) {
-			print color "$col->{to}"   if $color; printf "\tto:%s", $msg->{$id}->{to}[$i];
-			print color "$col->{info}" if $color; printf " Delay:%s", formattime( $msg->{$id}->{delay}[$i] );
+
+			print color "$col->{to}"   if $color; 
+			if ( $anonymize ) { printf "\tto:%s", 'recipient@destination.org' }
+			else { printf "\tto:%s", $msg->{$id}->{to}[$i] }
+
+			if ( $msg->{$id}->{delay}[$i] =~ /^\d+$/ ) {
+				if ( $delaywarn < $msg->{$id}->{delay}[$i] && $color ) { print color "$col->{longdelay}" }
+				elsif ( $color ) { print color "$col->{shortdelay}" }; 
+				printf " Delay:%s", formattime( $msg->{$id}->{delay}[$i] );
+			}
 
 			$col->{mystatus} = checkstatuscolor( $msg->{$id}->{status}[$i] );
 			print color "$col->{mystatus}" if $color; printf " Status:%s", $msg->{$id}->{status}[$i];
@@ -256,7 +276,7 @@ sub PrintMailInfo_visual {
         	}
 	}
         else {
-		print color "$col->{mystatus}" if $color; printf " Status:%s", $msg->{$id}->{status}[$#{$msg->{$id}->{status}}];
+		print color "$col->{mystatus}" if $color; printf " Status:%-10s", $msg->{$id}->{status}[$#{$msg->{$id}->{status}}];
 		print color "$col->{from}"     if $color; printf " From:%s", $msg->{$id}->{from};
 		print color "$col->{to}"       if $color; printf " To:%s", $to;
         }
