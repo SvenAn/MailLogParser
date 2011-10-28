@@ -1,5 +1,5 @@
 #!/usr/bin/perl -w
-###             mlp.pl v0.001                   ###
+###             mlp.pl v0.002                   ###
 # MailLogParse by Sven Andreassen sven@tideli.com #
 # a small utility to parse e-mail log files       #
 # printing all necessary info about an e-mail     #
@@ -29,15 +29,18 @@ my $col = {
 	sent   	      => 'GREEN',
 	spam          => 'BOLD RED',
 	notspam       => 'GREEN',
-	quarantine    => 'BOLD RED'
+	quarantine    => 'BOLD RED',
+	tls           => 'GREEN',
+	tlstrust      => 'BOLD GREEN',
 };
 
+#We want to make sure Bold is not set unless explicitly specified.
 while ( my ($key, $value) = each(%$col) ) {
 	unless ( $value =~ /^BOLD/ ) { $col->{$key} = "RESET $value"; };
 }
 
-my ( $verbose, $brief, $logfile, $help, $csv, $debug, $Xdebug, $color, $anonymize );
-&ReadConfigFile(); # Read default config before processing command line options;
+my ( $verbose, $brief, $logfile, $help, $csv, $debug, $Xdebug, $color, $anonymize, $tlsinfo );
+&ReadConfigFile(); # We want to read default config before processing command line options;
 
 use Getopt::Long;
 my $path = '';
@@ -52,6 +55,7 @@ my $options = GetOptions ( "v|verbose"   => \$verbose,
                            "xd|xdebug"   => \$Xdebug,
                            "a|ansicolor" => \$color,
                            "anonymize"   => \$anonymize,
+                           "tlsinfo"     => \$tlsinfo,
                            "h|help"      => \$help
 );
 my $address = $ARGV[0] || 'all';
@@ -76,7 +80,7 @@ unless($@) { $gz_loaded = 1; print "Debug: Compress::Zlib loaded.\n" if $debug; 
 
 
 # All sorts of variables
-my ( $i, $j, $msg, $time, $server, $cmd, $id, $line, $Mailscanner, $mapper, $mapperid, $starttime, $endtime, $postgreylist, $Postgrey );
+my ( $i, $j, $msg, $time, $server, $cmd, $id, $line, $Mailscanner, $mapper, $mapperid, $starttime, $endtime, $postgreylist, $Postgrey, $tls );
 my ( $lines, $entries ) = 0;
 my @config;
 my $delaywarn = 600; #seconds..
@@ -216,7 +220,16 @@ sub formattime {
 	else { return "$secs $secexpr" }
 }
 
+sub formatnr {
+	my $num = $_[0];
 
+	if ( $num > 1000000 ) { $num = sprintf( "%.1f mill", $num / 1000000 ); }
+	elsif ( $num > 1000 ) { $num = sprintf( "%.1fk", $num / 1000 ); }
+
+
+	return "$num";
+
+}
 ###
 # Printing the result in chosen format.
 sub PrintMailInfo_visual {
@@ -273,6 +286,20 @@ sub PrintMailInfo_visual {
 
 			print color "$col->{info}"     if $color;
 			printf " Sent to:%s\n\tInfo:%s\n", $msg->{$id}->{relay}[$i], $msg->{$id}->{info}[$i];
+
+			if ( $tlsinfo ) {
+				print "\tEncryption: ";
+				if ( defined( $tls->{$msg->{$id}->{relay}[$i]}->{relay} ) ) {
+					if ( $color ) {
+						if ( $tls->{$msg->{$id}->{relay}[$i]}->{type} =~ /Untrust/ ) { print color "$col->{tls}" }
+						else { print color "$col->{tlstrust}" }
+					}
+					printf "%s\n", $tls->{$msg->{$id}->{relay}[$i]}->{type};
+				}
+				else {
+					print "none\n";
+				}
+			}
         	}
 	}
         else {
@@ -308,6 +335,7 @@ sub printmailinfo {
 		unless ( defined( $msg->{$id}->{status} )       ) { $msg->{$id}->{status}       = ['<!>'] }
 		unless ( defined( $msg->{$id}->{relay} )        ) { $msg->{$id}->{relay}        = ['<!>'] }
 		unless ( defined( $msg->{$id}->{info} )         ) { $msg->{$id}->{info}         = ['<!>'] }
+#		unless ( defined( $msg->{$id}->{client} )       ) { $msg->{$id}->{client}       =  '<!>'  }
 
 		if ( defined( $msg->{$id}->{mailscanner} ) ) {
 			unless ( defined( $msg->{$id}->{spam_status} )       ) { $msg->{$id}->{spam_status}         = '<!>' }
@@ -380,6 +408,8 @@ sub parsepostfix {
 		push @{ $msg->{$id}->{status} }, $1 if $line =~ /status=(\w+)/;
 		push @{ $msg->{$id}->{relay} }, $1 if $line =~ /relay=(.*?), /;
 
+		#$msg->{$id}->{client} = $1 if $line =~ /client=.*\[(\d{1,3}.\d{1,3}\.\d{1,3}\.\d{1,3})\]/;
+
 		# Adjust relay info to "thrash" if mail is bounced.
 		if ( defined( $msg->{$id}->{status}[$#{$msg->{$id}->{status}}] ) ) {
 			if ( $msg->{$id}->{status}[$#{$msg->{$id}->{status}}] =~ /bounced/ ) {
@@ -387,6 +417,16 @@ sub parsepostfix {
 			}
 		}
 		push @{ $msg->{$id}->{info}   }, $1 if $line =~ /(\(.*\)$)/;
+	}
+}
+
+
+sub parsetls {
+	if ( $line =~ /(Trusted TLS|Untrusted TLS) connection established to (.*\[\d{1,3}.\d{1,3}\.\d{1,3}\.\d{1,3}\]:\d+): (.*)/ ) {
+		$tls->{$2}->{type} = $1;
+		$tls->{$2}->{relay} = $2;
+		$tls->{$2}->{details} = $3;
+		#print "Got:<$tls->{$2}->{relay}>\n";
 	}
 }
 
@@ -468,6 +508,13 @@ sub ParseLine {
 		$Postgrey = 1;
 		print "\tDebug: Parsing: <$_>\n" if $Xdebug;
 		parsepostgrey( $_ );
+	}
+
+	# Check if line is in a known TLS format:
+	elsif ( $_[0] =~ /^(\w\w\w\s{1,2}\d{1,2} \d\d:\d\d:\d\d) .* postfix\/\w+\[\d+\]: (\w+ TLS connection established .*)/ ) {
+		( $time, $line ) = ( $1, $2 );
+		print "\tDebug: Parsing (TLS): <$_>\n" if $Xdebug;
+		parsetls( $_ );
 	}
 
 	else {
@@ -553,10 +600,13 @@ else {
 
 
 unless ( $csv ) {
-	$endtime = time - $starttime;
+	$endtime = formattime( time - $starttime );
+	$lines = formatnr( $lines );
+	if ( $entries == 0 ) { $entries = 'No' }
+
 	print color "$col->{headline}" if $color;
 	print "_________________________________________________\n";
-	print "Done. $lines lines parsed in $endtime seconds. $entries entries found.\n" if ! $debug;
+	print "Done. $lines lines parsed in $endtime. $entries entries found.\n" if ! $debug;
 	print color 'reset' if $color;
 }
 
