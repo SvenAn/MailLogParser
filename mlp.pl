@@ -281,6 +281,16 @@ sub checkpostgreytriple {
 }
 
 
+sub uniquerecipient {
+        if ( defined ( $msg->{$id}->{to} ) ) {
+            for $i ( 0 .. $#{ $msg->{$id}->{to} } ) {
+                if ( ${ $msg->{$id}->{to} }[$i] eq $_[0] ) { return "nope" }
+            }
+        }
+        return "yes";
+}
+
+
 sub formattime {
     my ( $dayexpr, $hourexpr, $minexpr, $secexpr );
     $i = $_[0];
@@ -328,7 +338,6 @@ sub formatnr {
 }
 
 
-
 ###
 # Printing the result in chosen format.
 sub PrintMailInfo_visual {
@@ -353,7 +362,7 @@ sub PrintMailInfo_visual {
             print "\tPostgrey delay: $j.\n";
         }
 
-        if ( defined( $msg->{$id}->{mailscanner} ) ) {
+        if ( defined( $msg->{$id}->{mailscanner} ) && defined( $msg->{$id}->{scanned} ) ) {
             if ( $color ) {
                 my $col->{myspamstatus} = checkstatuscolor( $msg->{$id}->{spam_status} );
                 print color "$col->{myspamstatus}";
@@ -364,9 +373,14 @@ sub PrintMailInfo_visual {
             print color "$col->{info}" if $color;
             printf "\tchecks:%.120s\n", $msg->{$id}->{spam_score_detail};
         }
+        elsif ( defined( $msg->{$id}->{mailscanner} ) && ! defined( $msg->{$id}->{scanned} ) ) {
+            print color "$col->{info}" if $color;
+            print "\tMail is passed to mailscanner, but not checked.\n";
+            
+        }
 
         #Hack to remove extra recipient info only needed if mail is rejected og sent to quarantine:
-        shift( @{ $msg->{$id}->{to} } ) if $#{ $msg->{$id}->{to} } > $#{ $msg->{$id}->{status} };
+        #shift( @{ $msg->{$id}->{to} } ) if $#{ $msg->{$id}->{to} } > $#{ $msg->{$id}->{status} };
 
         for $i ( 0..$#{ $msg->{$id}->{info} } ) {
 
@@ -417,13 +431,12 @@ sub PrintMailInfo_visual {
 ###
 # Printing the result in chosen format.
 sub printmailinfo {
-
-# Filling the holes of incomplete records...
+    # Filling the holes of incomplete records...
     unless ( defined( $msg->{$id}->{from} ) ) { $msg->{$id}->{from} =  '<!>'  }
     unless ( defined( $msg->{$id}->{to} )   ) { $msg->{$id}->{to}   = ['<!>'] }
     unless ( defined( $msg->{$id}->{id} )   ) { $msg->{$id}->{id}   =  '<!>'  }
 
-# Check if mail matches optional $address and return if not..
+    # Check if mail matches optional $address and return if not..
     $j = join( ", ", @{ $msg->{$id}->{to} } );
     if ( $address eq 'all' || $msg->{$id}->{from} =~ /$address/i || $j =~ /$address/i || $msg->{$id}->{id} =~ /$address/ ) { 
 
@@ -434,7 +447,7 @@ sub printmailinfo {
         unless ( defined( $msg->{$id}->{status} )       ) { $msg->{$id}->{status}       = ['<!>'] }
         unless ( defined( $msg->{$id}->{relay} )        ) { $msg->{$id}->{relay}        = ['<!>'] }
         unless ( defined( $msg->{$id}->{info} )         ) { $msg->{$id}->{info}         = ['<!>'] }
-#		unless ( defined( $msg->{$id}->{client} )       ) { $msg->{$id}->{client}       =  '<!>'  }
+        #unless ( defined( $msg->{$id}->{client} )       ) { $msg->{$id}->{client}       =  '<!>'  }
 
         if ( defined( $msg->{$id}->{mailscanner} ) ) {
             unless ( defined( $msg->{$id}->{spam_status} )       ) { $msg->{$id}->{spam_status}         = '<!>' }
@@ -442,6 +455,8 @@ sub printmailinfo {
             unless ( defined( $msg->{$id}->{spam_score_required})) { $msg->{$id}->{spam_score_required} = '<!>' }
             unless ( defined( $msg->{$id}->{spam_score_detail} ) ) { $msg->{$id}->{spam_score_detail}   = '<!>' }
         }
+
+
 
         PrintMailInfo_csv() if $csv;
         PrintMailInfo_visual() unless $csv;
@@ -472,20 +487,24 @@ sub parsepostfix {
     if ( $cmd eq 'qmgr' ) {
         if ( $line =~ /^removed$/ ) {
             $msg->{$id}->{deleted_time} = $time;
+	    print "\tDebug: Got remove info, printing mail.\n" if $xdebug;
             printmailinfo( $msg->{$id} ); 
         } 
         else {
             $msg->{$id}->{from} = $1 if $line =~ /^from=<([^>]+)>/;
             $msg->{$id}->{size} = $1 if $line =~ /size=(\d+)/;
             $msg->{$id}->{first_seen} = $time;
+	    print "\tDebug: Got from/size/first_seen info.\n" if $xdebug;
         }
 
     }
     elsif ( $cmd eq 'cleanup' ) {
         $msg->{$id}->{first_seen} = $time;
-        $msg->{$id}->{msgid} = $1 if $line =~ /^message-id=(<[^>]+>)/;
+        $msg->{$id}->{msgid} = $1 if $line =~ /^message-id=(<[^>]+>)/ ;
         $msg->{$id}->{from} = $1 if $line =~ /from=<([^>]+)>/;
         push @{ $msg->{$id}->{to} }, $1 if $line =~/to=<([^>]+)>/;
+        #print "hiha: $line\n" if $line =~/to=<([^>]+)>/;
+	print "\tDebug: Got first_seen,msgid,from,to info.\n" if $xdebug;
     }
     elsif ( $cmd eq 'smtpd'  && $line =~ /^(reject):/ ) {
         push @{ $msg->{$id}->{status} }, $1;
@@ -496,11 +515,12 @@ sub parsepostfix {
         $msg->{$id}->{deleted_time} = $time;
         $msg->{$id}->{from} = $1 if $line =~ /from=<([^>]+)>/;
         $msg->{$id}->{size} = 'unknown';
+	print "\tDebug: Got reject info, printing mail.\n" if $xdebug;
         printmailinfo( $msg->{$id} ); 
 
     }
     elsif ( $cmd =~ /(virtual|smtp|error|local)/) {
-        push @{ $msg->{$id}->{to}  }, $1 if $line =~/to=<([^>]+)>/;
+        push @{ $msg->{$id}->{to}  }, $1 if $line =~/to=<([^>]+)>/ && uniquerecipient( $1 ) eq "yes";
         push @{ $msg->{$id}->{delay}  }, $1 if $line =~ /delay=(\d+)/;
         push @{ $msg->{$id}->{delay}  }, $1 if $line =~ /delay=(\d+\.\d+)/;
         push @{ $msg->{$id}->{status} }, $1 if $line =~ /status=(\w+)/;
@@ -515,6 +535,7 @@ sub parsepostfix {
             }
         }
         push @{ $msg->{$id}->{info}   }, $1 if $line =~ /(\(.*\)$)/;
+	print "\tDebug: Got delay/relay/status info.\n" if $xdebug;
     }
 }
 
@@ -524,7 +545,7 @@ sub parsetls {
         $tls->{$2}->{type} = $1;
         $tls->{$2}->{relay} = $2;
         $tls->{$2}->{details} = $3;
-        #print "Got:<$tls->{$2}->{relay}>\n";
+	print "\tDebug: Got tls info.\n" if $xdebug;
     }
 }
 
@@ -536,9 +557,11 @@ sub parsemailscanner {
         $id = $1;
         $msg->{$id} = $msg->{$id} ||= { id => $id, time => '<!>', server => '<!>', to => [ ] };
         $msg->{$id}->{mailscanner} = 'TRUE';
+	    print "\tDebug: Got Mailscanner = TRUE\n" if $xdebug;
     }
 
     if ( $line =~ /\((.*\@.*)\) to .* (is not spam|is spam|is too big|is whitelisted|is blacklisted)/ ) {
+        $msg->{$id}->{scanned} = 'TRUE';
         $msg->{$id}->{from} = $1;
         $msg->{$id}->{spam_status} = $2;
 
@@ -550,6 +573,7 @@ sub parsemailscanner {
         else { 
             $msg->{$id}->{spam_score_detail} = 'none';
         }
+	    print "\tDebug: Got spam status+score.\n" if $xdebug;
     }
     elsif ( $line =~ /Spam Actions: message .* actions are store$/ ) {
         $msg->{$id}->{relay} = ['Quarantine'];
@@ -559,9 +583,11 @@ sub parsemailscanner {
         $msg->{$id}->{info} = ['none'];
         $msg->{$id}->{deleted_time} = "$time";
         printmailinfo( $msg->{$id} );
+	print "\tDebug: Got spam quarantine info.\n" if $xdebug;
     }
     elsif ( $line =~ /^Requeue: ([0-9A-F]+)\.[0-9A-F]+ to ([0-9A-F]+)$/ ) {
         $mapper->{$2} = $1;
+	print "\tDebug: Got requeue info.\n" if $xdebug;
     }
 }
 
@@ -577,9 +603,8 @@ sub parsepostgrey {
         $postgreylist->{$i}->{client_address} = $3;
         $postgreylist->{$i}->{sender} = $4;
         $postgreylist->{$i}->{recipient} = $5;
-        #print "Got: $postgreylist->{$i}->{time}, $postgreylist->{$i}->{client_address}, $postgreylist->{$i}->{sender},
-        #     $postgreylist->{$i}->{recipient}!\n";
-        #print "Got: $i\n";
+        print "Got: $postgreylist->{$i}->{time}, $postgreylist->{$i}->{client_address}, $postgreylist->{$i}->{sender},
+             $postgreylist->{$i}->{recipient}!\n" if $xdebug;
     }
 }
 
@@ -589,7 +614,7 @@ sub ParseLine {
     # Check if line is in a known Postfix format:
     if ( $_[0] =~ /^(\w\w\w\s{1,2}\d{1,2} \d\d:\d\d:\d\d) (.*) postfix\/(\w+)\[\d+\]: ([0-9A-Z]+): (.*)/ ) {
         ( $time, $server, $cmd, $id, $line ) = ( $1, $2, $3, $4, $5 );
-        print "\tDebug: Parsing: <$_>\n" if $xdebug;
+        print "\tDebug: Parsing (Postfix): <$_>\n" if $xdebug;
         parsepostfix( $_ );
     }
 
@@ -597,7 +622,7 @@ sub ParseLine {
     elsif ( $_[0] =~ /^(\w\w\w\s{1,2}\d{1,2} \d\d:\d\d:\d\d) (\w+) MailScanner\[\d+\]: (.*)/ ) {
         ( $time, $server, $line ) = ( $1, $2 ,$3 );
         $Mailscanner = 1;
-        print "\tDebug: Parsing: <$_>\n" if $xdebug;
+        print "\tDebug: Parsing (Mailscanner): <$_>\n" if $xdebug;
         parsemailscanner( $_ );
     }
 
@@ -605,7 +630,7 @@ sub ParseLine {
     elsif ( $_[0] =~ /^(\w\w\w\s{1,2}\d{1,2} \d\d:\d\d:\d\d) (\w+) postgrey\[\d+\]: (.*)/ ) {
         ( $time, $server, $line ) = ( $1, $2 ,$3 );
         $Postgrey = 1;
-        print "\tDebug: Parsing: <$_>\n" if $xdebug;
+        print "\tDebug: Parsing (Postgrey): <$_>\n" if $xdebug;
         parsepostgrey( $_ );
     }
 
