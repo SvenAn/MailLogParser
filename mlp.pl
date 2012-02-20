@@ -9,6 +9,7 @@
 
 use strict;
 use warnings;
+use File::Spec;
 use Term::ANSIColor;
 #use Compress::Zlib;
 
@@ -69,7 +70,7 @@ my $col = {
 };
 
 
-my ( $verbose, $brief, $logfile, $help, $csv, $debug, $xdebug, $color, $anonymize, $tlsinfo );
+my ( $verbose, $brief, $file, $help, $csv, $debug, $xdebug, $color, $anonymize, $tlsinfo );
 
 
 &ReadConfigFile(); # We want to read default config before processing command line options;
@@ -82,13 +83,11 @@ while ( my ($key, $value) = each(%$col) ) {
 
 
 use Getopt::Long;
-my $path;
 my $NumberOfFiles;
 my $options = GetOptions ( 
         "v|verbose"   => \$verbose,
         "b|brief"     => \$brief,
-        "p|logpath:s" => \$path,
-        "l|logfile:s" => \$logfile,
+        "l|logfile:s" => \$file,
         "n|num:i"     => \$NumberOfFiles,
         "c|csv"       => \$csv,
         "d|debug"     => \$debug,
@@ -99,6 +98,9 @@ my $options = GetOptions (
         "h|help"      => \$help
 );
 my $address = $ARGV[0] || 'all';
+
+my ($volume,$path,$logfile);
+($volume,$path,$logfile) = File::Spec->splitpath( $file ) if defined($file);
 
 
 die "$helptext" if $help;
@@ -203,8 +205,8 @@ sub ReadConfigFile() {
 # Printing info in csv format.
 sub PrintMailInfo_csv() {
 
-    $msg->{$id}->{to}     = join( ";", @{ $msg->{$id}->{to} } );
-    if ( $msg->{$id}->{to} eq '' ) { $msg->{$id}->{to} = '<>'; }
+    my $msgidto = join( ";", @{ $msg->{$id}->{to} } );
+    if ( $msgidto eq '' ) { $msgidto = '<>'; }
 
     $msg->{$id}->{delay}  = join( ";", @{ $msg->{$id}->{delay}  } );
     $msg->{$id}->{relay}  = join( ";", @{ $msg->{$id}->{relay}  } );
@@ -216,7 +218,7 @@ sub PrintMailInfo_csv() {
             $i = "%s,%s,%s,From:%s,To:%s,Spaminfo:%s,%s,%s,%s,Size:%s,Delay:%s,Status:%s,Relay:%s,Info:%s\n";
             printf "$i",
                    $msg->{$id}->{first_seen}, $msg->{$id}->{deleted_time}, $msg->{$id}->{id}, $msg->{$id}->{from},
-                        $msg->{$id}->{to},
+                        $msgidto,
                    $msg->{$id}->{spam_status}, $msg->{$id}->{spam_score}, $msg->{$id}->{spam_score_required},
                          $msg->{$id}->{spam_score_detail},
                    $msg->{$id}->{size}, $msg->{$id}->{delay}, $msg->{$id}->{status}, $msg->{$id}->{relay}, $msg->{$id}->{info};
@@ -225,32 +227,32 @@ sub PrintMailInfo_csv() {
             $i = "%s,%s,%s,%s,From:%s,To:%s\n";
             printf "$i",
                    $msg->{$id}->{deleted_time}, $msg->{$id}->{id}, $msg->{$id}->{status}, $msg->{$id}->{spam_status},
-                        $msg->{$id}->{from}, $msg->{$id}->{to};
+                        $msg->{$id}->{from}, $msgidto;
         }
         else {
             $i = "%s,%s,%s,%s,From:%s,To:%s,Sent to:%s\n";
             printf "$i",
                    $msg->{$id}->{deleted_time}, $msg->{$id}->{id}, $msg->{$id}->{status}, $msg->{$id}->{spam_status},
-                        $msg->{$id}->{from}, $msg->{$id}->{to}, $msg->{$id}->{relay},
+                        $msg->{$id}->{from}, $msgidto, $msg->{$id}->{relay},
         }
     }
     else {
         if ( $verbose ) {
             $i = "%s,%s,%s,From:%s,To:%s,Size:%s,Delay:%s,Status:%s,Relay:%s,Info:%s\n";
             printf "$i",
-                   $msg->{$id}->{first_seen}, $msg->{$id}->{deleted_time}, $msg->{$id}->{id}, $msg->{$id}->{from}, $msg->{$id}->{to},
+                   $msg->{$id}->{first_seen}, $msg->{$id}->{deleted_time}, $msg->{$id}->{id}, $msg->{$id}->{from}, $msgidto,
                    $msg->{$id}->{size}, $msg->{$id}->{delay}, $msg->{$id}->{status}, $msg->{$id}->{relay}, $msg->{$id}->{info};
         }
         elsif ( $brief ) {
             $i = "%s,%s,%s,From:%s,To:%s\n";
             printf "$i",
-                   $msg->{$id}->{deleted_time}, $msg->{$id}->{id}, $msg->{$id}->{status}, $msg->{$id}->{from}, $msg->{$id}->{to};
+                   $msg->{$id}->{deleted_time}, $msg->{$id}->{id}, $msg->{$id}->{status}, $msg->{$id}->{from}, $msgidto;
 
         }
         else {
             $i = "%s,%s,%s,From:%s,To:%s,Sent to:%s\n";
             printf "$i",
-                   $msg->{$id}->{deleted_time}, $msg->{$id}->{id}, $msg->{$id}->{status}, $msg->{$id}->{from}, $msg->{$id}->{to},
+                   $msg->{$id}->{deleted_time}, $msg->{$id}->{id}, $msg->{$id}->{status}, $msg->{$id}->{from}, $msgidto,
                         $msg->{$id}->{relay},
         }
     }
@@ -268,7 +270,7 @@ sub checkstatuscolor {
 
 sub checkpostgreytriple { 
     if ( defined ( $msg->{$id}->{from} ) && defined( $msg->{$id}->{to}[0] ) ) {
-        $i = "$msg->{$id}->{from}-$msg->{$id}->{to}[0]";
+       $i = "$msg->{$id}->{from}-$msg->{$id}->{to}[0]";
     }
     if ( defined( $postgreylist->{$i}->{delay} ) ) {
         return $i;
