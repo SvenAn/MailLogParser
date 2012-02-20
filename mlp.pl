@@ -13,6 +13,40 @@ use Term::ANSIColor;
 #use Compress::Zlib;
 
 
+my $helptext = <<EOF;
+###  MailLogParse v0.002 by Sven Andreassen ###
+##					     ##
+
+Syntax:
+mlp.pl [-vblncdxdah] <mail address>
+
+        "v|verbose"   = Prints extra info about the mail on multiple lines.
+        "b|brief"     = Prints only some info about the mail.
+        "l|logfile:s" = Specify which logfile to read.
+        "n|num:i"     = How many generation of files to read. Mlp.pl will also
+			unzip .gz or .bz2 files. 
+        "c|csv"       = Prints output in csv format. This option can be used
+			along with the -v or -b options.
+        "d|debug"     = Prints debug info.
+        "xd|xdebug"   = Will provide extensive debug info about all processed
+			lines.
+        "a|ansicolor" = Gives output in wonderful colors.
+        "anonymize"   = Anonymizes the info provided.
+        "tlsinfo"     = Prints tlsinfo.
+        "h|help"      = Prints this help info and quits.
+
+Example:
+	Searching for someone@ (all domains) in the seven past generations 
+	of /var/log/maillog and print verbose output about the findings:
+		
+		mlp.pl -v -l /var/log/maillog -n 7 someone@
+
+All parameters can be set in /etc/mlp.conf or in .mlprc. Please see http://url
+for further information.
+
+EOF
+
+
 # Default colors
 my $col = {
     headline      => 'YELLOW',
@@ -26,7 +60,7 @@ my $col = {
     longdelay     => 'BOLD YELLOW',
     bounced       => 'RED',
     reject        => 'BOLD RED',
-    sent   	      => 'GREEN',
+    sent          => 'GREEN',
     spam          => 'BOLD RED',
     notspam       => 'GREEN',
     quarantine    => 'BOLD RED',
@@ -63,8 +97,11 @@ my $options = GetOptions (
         "anonymize"   => \$anonymize,
         "tlsinfo"     => \$tlsinfo,
         "h|help"      => \$help
-        );
+);
 my $address = $ARGV[0] || 'all';
+
+
+die "$helptext" if $help;
 
 
 # Making sure all values have been handled properly: 
@@ -90,7 +127,8 @@ unless($@) { $gz_loaded = 1; print "Debug: Compress::Zlib loaded.\n" if $debug; 
 
 
 # All sorts of variables
-my ( $i, $j, $msg, $time, $server, $cmd, $id, $line, $Mailscanner, $mapper, $mapperid, $starttime, $endtime, $postgreylist, $Postgrey, $tls );
+my ( $i, $j, $msg, $time, $server, $cmd, $id, $line, $Mailscanner, $mapper, $mapperid, $starttime,
+    $endtime, $postgreylist, $Postgrey, $tls );
 my $lines = 0;
 my $entries = 0;
 my @config;
@@ -149,6 +187,8 @@ sub ReadConfigFile() {
 
     if ( -e "$ENV{HOME}/.mlprc" ) { $file = "$ENV{HOME}/.mlprc"; }
     elsif ( -e "/etc/mlp.conf" ) { $file = "/etc/mlp.conf"; }
+    elsif ( -e "/etc/mlp/mlp.conf" ) { $file = "/etc/mlp/mlp.conf"; }
+    elsif ( -e "/usr/local/etc/mlp.conf" ) { $file = "/usr/local/etc/mlp.conf"; }
 
     if ( defined( $file ) ) {
         open( CONF, $file ) || print "ERROR: Could not open $file!";
