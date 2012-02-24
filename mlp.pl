@@ -465,7 +465,7 @@ sub printmailinfo {
 
     #After processing the mail we delete all traces of it...
     unless ( checkpostgreytriple() eq "not ok" ) { 
-        delete $postgreylist->{$_};
+        if ( defined( $postgreylist->{$_} ) { delete $postgreylist->{$_} };
     }
     delete $msg->{$id};
     delete $mapper->{$mapperid} if defined( $mapperid );
@@ -734,7 +734,8 @@ unless ( $csv ) {
     $endtime = formattime( time - $starttime );
     $lines = formatnr( $lines );
     if ( $entries == 0 ) { $entries = 'No' }
-    elsif ( $entries == 1 ) { $entryname = 'entry' };
+    elsif ( $entries == 1 ) { $entryname = 'entry' }
+    else { $entries = formatnr( $entries ) };
 
     print color "$col->{headline}" if $color;
     print "_________________________________________________\n";
