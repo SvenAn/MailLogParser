@@ -32,8 +32,8 @@ mlp.pl [-vblncdxdah] <mail address>
         "xd|xdebug"   = Will provide extensive debug info about all processed
 			lines.
         "a|ansicolor" = Gives output in wonderful colors.
-        "anonymize"   = Anonymizes the info provided.
         "tlsinfo"     = Prints tlsinfo.
+        "stdin"       = Takes input from STDIN rather than read the log file(s).
         "h|help"      = Prints this help info and quits.
 
 Example:
@@ -70,7 +70,7 @@ my $col = {
 };
 
 
-my ( $verbose, $brief, $file, $help, $csv, $debug, $xdebug, $color, $anonymize, $tlsinfo );
+my ( $verbose, $brief, $file, $help, $csv, $debug, $xdebug, $color, $stdin, $tlsinfo );
 
 
 &ReadConfigFile(); # We want to read default config before processing command line options;
@@ -93,8 +93,8 @@ my $options = GetOptions (
         "d|debug"     => \$debug,
         "xd|xdebug"   => \$xdebug,
         "a|ansicolor" => \$color,
-        "anonymize"   => \$anonymize,
         "tlsinfo"     => \$tlsinfo,
+        "stdin"       => \$stdin,
         "h|help"      => \$help
 );
 my $address = $ARGV[0] || 'all';
@@ -130,7 +130,7 @@ unless($@) { $gz_loaded = 1; print "Debug: Compress::Zlib loaded.\n" if $debug; 
 
 # All sorts of variables
 my ( $i, $j, $msg, $time, $server, $cmd, $id, $line, $Mailscanner, $mapper, $mapperid, $starttime,
-    $endtime, $postgreylist, $Postgrey, $tls );
+    $endtime, $postgreylist, $Postgrey, $tls, $to );
 my $lines = 0;
 my $entries = 0;
 my @config;
@@ -183,13 +183,13 @@ sub parseconfig {
 
 
 ###
-# Reading config in /etc/mlp.conf and ~/.mlprc
+# Reading config in /etc/mlp.conf, /etc/mlp/mlp.conf, /usr/local/etc or ~/.mlprc
 sub ReadConfigFile() {
     my $file;
 
-    if ( -e "$ENV{HOME}/.mlprc" ) { $file = "$ENV{HOME}/.mlprc"; }
-    elsif ( -e "/etc/mlp.conf" ) { $file = "/etc/mlp.conf"; }
-    elsif ( -e "/etc/mlp/mlp.conf" ) { $file = "/etc/mlp/mlp.conf"; }
+    if ( -e "$ENV{HOME}/.mlprc" )          { $file = "$ENV{HOME}/.mlprc";       }
+    elsif ( -e "/etc/mlp.conf" )           { $file = "/etc/mlp.conf";           }
+    elsif ( -e "/etc/mlp/mlp.conf" )       { $file = "/etc/mlp/mlp.conf";       }
     elsif ( -e "/usr/local/etc/mlp.conf" ) { $file = "/usr/local/etc/mlp.conf"; }
 
     if ( defined( $file ) ) {
@@ -217,11 +217,10 @@ sub PrintMailInfo_csv() {
         if ( $verbose ) {
             $i = "%s,%s,%s,From:%s,To:%s,Spaminfo:%s,%s,%s,%s,Size:%s,Delay:%s,Status:%s,Relay:%s,Info:%s\n";
             printf "$i",
-                   $msg->{$id}->{first_seen}, $msg->{$id}->{deleted_time}, $msg->{$id}->{id}, $msg->{$id}->{from},
-                        $msgidto,
+                   $msg->{$id}->{first_seen}, $msg->{$id}->{deleted_time}, $msg->{$id}->{id}, $msg->{$id}->{from}, $msgidto,
                    $msg->{$id}->{spam_status}, $msg->{$id}->{spam_score}, $msg->{$id}->{spam_score_required},
-                         $msg->{$id}->{spam_score_detail},
-                   $msg->{$id}->{size}, $msg->{$id}->{delay}, $msg->{$id}->{status}, $msg->{$id}->{relay}, $msg->{$id}->{info};
+                   $msg->{$id}->{spam_score_detail}, $msg->{$id}->{size}, $msg->{$id}->{delay}, $msg->{$id}->{status},
+                   $msg->{$id}->{relay}, $msg->{$id}->{info};
         }
         elsif ( $brief ) {
             $i = "%s,%s,%s,%s,From:%s,To:%s\n";
@@ -257,6 +256,7 @@ sub PrintMailInfo_csv() {
         }
     }
 }
+
 
 sub checkstatuscolor {
     return $col->{bounced} if $_[0] =~ /bounced/;
@@ -332,101 +332,142 @@ sub formatnr {
     if ( $num > 1000000 ) { $num = sprintf( "%.1f mill", $num / 1000000 ); }
     elsif ( $num > 1000 ) { $num = sprintf( "%.1fk", $num / 1000 ); }
 
-
     return "$num";
-
 }
 
 
 ###
-# Printing the result in chosen format.
-sub PrintMailInfo_visual {
-
-    my $to = join( ", ", @{ $msg->{$id}->{to} } );
-    if ( $to eq '' ) { $to = '<>'; }
+# Printing the result in brief  and standard format.
+sub Printmailinfo_visual {
+    my $type = $_[0];
 
     $col->{mystatus} = checkstatuscolor( $msg->{$id}->{status}[$#{$msg->{$id}->{status}}] ) if $#{$msg->{$id}->{status}} > -1;
 
-    print color "$col->{time}" if $color; printf "%-12s", $msg->{$id}->{deleted_time};
-    unless( $brief ) { print color "$col->{id}" if $color; printf " %-12s", $msg->{$id}->{id}; }
+    # Time
+    print color "$col->{time}" if $color;
+    printf "%-12s", $msg->{$id}->{deleted_time};
 
-    if ( $verbose ) {
-        print color "$col->{from}" if $color; 
-        if ( $anonymize ) { printf " From:%s", 'sender@source.org' }
-        else { printf " From:%s", $msg->{$id}->{from} };
+    # print ID unless type = brief.
+    if ( $type ne 'brief' ) {
+        print color "$col->{id}" if $color;
+        printf " %-12s", $msg->{$id}->{id};
+    }
 
-        print color "$col->{size}" if $color; printf " Size:%s\n", $msg->{$id}->{size}; 
+    # Status
+    if ( $color ) {
+        $col->{mystatus} = checkstatuscolor( $msg->{$id}->{status}[0] );
+        print color "$col->{mystatus}";
+    }
+    printf " %-8s", $msg->{$id}->{status}[0];
 
-        unless ( checkpostgreytriple() eq "not ok" ) { 
-            $j = formattime( $postgreylist->{$i}->{delay} );
-            print "\tPostgrey delay: $j.\n";
-        }
+    # From
+    print color "$col->{from}" if $color; 
+    printf " From:%-40s", $msg->{$id}->{from};
 
-        if ( defined( $msg->{$id}->{mailscanner} ) && defined( $msg->{$id}->{scanned} ) ) {
+    # To
+    print color "$col->{to}" if $color; 
+    printf " To:%s", @{ $msg->{$id}->{to} }[0];
+
+    # if there are more than one recipient we want to print them on separate lines:
+    if ( $#{ $msg->{$id}->{to} } > 0 ) {
+        for $i ( 1..$#{ $msg->{$id}->{info} } ) {
+            print color "$col->{to}" if $color; 
+            printf "\n\t\t\t\t\t\t\t      To:%-40s", @{ $msg->{$id}->{to} }[$i];
             if ( $color ) {
-                my $col->{myspamstatus} = checkstatuscolor( $msg->{$id}->{spam_status} );
-                print color "$col->{myspamstatus}";
+                $col->{mystatus} = checkstatuscolor( $msg->{$id}->{status}[0] );
+                print color "$col->{mystatus}";
             }
-            printf "\tSpam stat:'%s' score:%s required:%s\n", 
-                   $msg->{$id}->{spam_status}, $msg->{$id}->{spam_score}, $msg->{$id}->{spam_score_required};
-
-            print color "$col->{info}" if $color;
-            printf "\tchecks:%.120s\n", $msg->{$id}->{spam_score_detail};
+            printf " Status:%s", $msg->{$id}->{status}[0];
         }
-        elsif ( defined( $msg->{$id}->{mailscanner} ) && ! defined( $msg->{$id}->{scanned} ) ) {
-            print color "$col->{info}" if $color;
-            print "\tMail is passed to mailscanner, but not checked.\n";
-            
-        }
-
-        #Hack to remove extra recipient info only needed if mail is rejected og sent to quarantine:
-        #shift( @{ $msg->{$id}->{to} } ) if $#{ $msg->{$id}->{to} } > $#{ $msg->{$id}->{status} };
-
-        for $i ( 0..$#{ $msg->{$id}->{info} } ) {
-
-            print color "$col->{to}"   if $color; 
-            if ( $anonymize ) { printf "\tto:%s", 'recipient@destination.org' }
-            else { printf "\tto:%s", $msg->{$id}->{to}[$i] }
-
-            if ( $msg->{$id}->{delay}[$i] =~ /^\d+$/ ) {
-                if ( $delaywarn < $msg->{$id}->{delay}[$i] && $color ) { print color "$col->{longdelay}" }
-                elsif ( $color ) { print color "$col->{shortdelay}" }; 
-                printf " Delay:%s", formattime( $msg->{$id}->{delay}[$i] );
-            }
-
-            $col->{mystatus} = checkstatuscolor( $msg->{$id}->{status}[$i] );
-            print color "$col->{mystatus}" if $color; printf " Status:%s", $msg->{$id}->{status}[$i];
-
-            print color "$col->{info}"     if $color;
-            printf " Sent to:%s\n\tInfo:%s\n", $msg->{$id}->{relay}[$i], $msg->{$id}->{info}[$i];
-
-            if ( $tlsinfo ) {
-                print "\tEncryption: ";
-                if ( defined( $tls->{$msg->{$id}->{relay}[$i]}->{relay} ) ) {
-                    if ( $color ) {
-                        if ( $tls->{$msg->{$id}->{relay}[$i]}->{type} =~ /Untrust/ ) { print color "$col->{tls}" }
-                        else { print color "$col->{tlstrust}" }
-                    }
-                    printf "%s\n", $tls->{$msg->{$id}->{relay}[$i]}->{type};
-                }
-                else {
-                    print "none\n";
-                }
-            }
-        }
-    }
-    else {
-        print color "$col->{mystatus}" if $color; printf " Status:%-10s", $msg->{$id}->{status}[$#{$msg->{$id}->{status}}];
-        print color "$col->{from}"     if $color; printf " From:%s", $msg->{$id}->{from};
-        print color "$col->{to}"       if $color; printf " To:%s", $to;
-    }
-    unless ( $brief || $verbose ) {
-        print color "$col->{info}"    if $color;
-        printf " Sent to:%s", $msg->{$id}->{relay}[$#{$msg->{$id}->{relay}}];
     }
     print "\n";
 }
 
+
+sub Printmailinfo_visual_verbose {
+    $col->{mystatus} = checkstatuscolor( $msg->{$id}->{status}[$#{$msg->{$id}->{status}}] ) if $#{$msg->{$id}->{status}} > -1;
+
+    # Time
+    print color "$col->{time}" if $color;
+    printf "%-12s", $msg->{$id}->{deleted_time};
+
+    # Id
+    print color "$col->{id}" if $color;
+    printf " %-12s", $msg->{$id}->{id};
+
+    # Client
+    print color "$col->{id}" if $color;
+    printf " client=%-12s", $msg->{$id}->{client};
+
+    # Size
+    print color "$col->{size}" if $color;
+    printf " Size:%s", $msg->{$id}->{size}; 
+
+    # Postgrey info
+    unless ( checkpostgreytriple() eq "not ok" ) { 
+        $j = formattime( $postgreylist->{$i}->{delay} );
+        print " Postgrey delay: $j.";
+    }
+
+    print "\n";
+
+    # Mailscanner
+    if ( defined( $msg->{$id}->{mailscanner} ) && defined( $msg->{$id}->{scanned} ) ) {
+        if ( $color ) {
+            my $col->{myspamstatus} = checkstatuscolor( $msg->{$id}->{spam_status} );
+            print color "$col->{myspamstatus}";
+        }
+        printf "\tSpam stat:'%s' score:%s required:%s\n", 
+               $msg->{$id}->{spam_status}, $msg->{$id}->{spam_score}, $msg->{$id}->{spam_score_required};
+
+        print color "$col->{info}" if $color;
+        printf "\tchecks:%.120s\n", $msg->{$id}->{spam_score_detail};
+    }
+    elsif ( defined( $msg->{$id}->{mailscanner} ) && ! defined( $msg->{$id}->{scanned} ) ) {
+        print color "$col->{info}" if $color;
+        print "\tInfo: Mail is passed to mailscanner, but not checked.\n";
+    }
+
+    # From
+    print color "$col->{from}" if $color; 
+    printf "\tFrom: %s\n", $msg->{$id}->{from};
+
+    #Hack to remove extra recipient info only needed if mail is rejected og sent to quarantine:
+    #shift( @{ $msg->{$id}->{to} } ) if $#{ $msg->{$id}->{to} } > $#{ $msg->{$id}->{status} };
+
+    for $i ( 0..$#{ $msg->{$id}->{info} } ) {
+
+        print color "$col->{to}"   if $color; 
+        printf "\t  To: %s", $msg->{$id}->{to}[$i]; 
+
+        if ( $msg->{$id}->{delay}[$i] =~ /^\d+$/ ) {
+            if ( $delaywarn < $msg->{$id}->{delay}[$i] && $color ) { print color "$col->{longdelay}" }
+            elsif ( $color ) { print color "$col->{shortdelay}" }; 
+            printf " Delay:%s", formattime( $msg->{$id}->{delay}[$i] );
+        }
+
+        $col->{mystatus} = checkstatuscolor( $msg->{$id}->{status}[$i] );
+        print color "$col->{mystatus}" if $color; printf " Status:%s", $msg->{$id}->{status}[$i];
+
+        print color "$col->{info}"     if $color;
+        printf " Sent to:%s\n\t  Info:%s\n", $msg->{$id}->{relay}[$i], $msg->{$id}->{info}[$i];
+
+        if ( $tlsinfo ) {
+            print "\tEncryption: ";
+            if ( defined( $tls->{$msg->{$id}->{relay}[$i]}->{relay} ) ) {
+                if ( $color ) {
+                    if ( $tls->{$msg->{$id}->{relay}[$i]}->{type} =~ /Untrust/ ) { print color "$col->{tls}" }
+                    else { print color "$col->{tlstrust}" }
+                }
+                printf "%s\n", $tls->{$msg->{$id}->{relay}[$i]}->{type};
+            }
+            else {
+                print "none\n";
+            }
+        }
+    }
+    print "\n";
+}
 
 ###
 # Printing the result in chosen format.
@@ -440,13 +481,14 @@ sub printmailinfo {
     $j = join( ", ", @{ $msg->{$id}->{to} } );
     if ( $address eq 'all' || $msg->{$id}->{from} =~ /$address/i || $j =~ /$address/i || $msg->{$id}->{id} =~ /$address/ ) { 
 
-        unless ( defined( $msg->{$id}->{first_seen} )   ) { $msg->{$id}->{first_seen}   =  '<!>'  }
+        unless ( defined( $msg->{$id}->{client}       ) ) { $msg->{$id}->{client}       =  '<!>'  }
+        unless ( defined( $msg->{$id}->{first_seen}   ) ) { $msg->{$id}->{first_seen}   =  '<!>'  }
         unless ( defined( $msg->{$id}->{deleted_time} ) ) { $msg->{$id}->{deleted_time} =  '<!>'  }
-        unless ( defined( $msg->{$id}->{size} )         ) { $msg->{$id}->{size}         =  '<!>'  }
-        unless ( defined( $msg->{$id}->{delay} )        ) { $msg->{$id}->{delay}        = ['<!>'] }
+        unless ( defined( $msg->{$id}->{size}   )       ) { $msg->{$id}->{size}         =  '<!>'  }
+        unless ( defined( $msg->{$id}->{delay}  )       ) { $msg->{$id}->{delay}        = ['<!>'] }
         unless ( defined( $msg->{$id}->{status} )       ) { $msg->{$id}->{status}       = ['<!>'] }
-        unless ( defined( $msg->{$id}->{relay} )        ) { $msg->{$id}->{relay}        = ['<!>'] }
-        unless ( defined( $msg->{$id}->{info} )         ) { $msg->{$id}->{info}         = ['<!>'] }
+        unless ( defined( $msg->{$id}->{relay}  )       ) { $msg->{$id}->{relay}        = ['<!>'] }
+        unless ( defined( $msg->{$id}->{info}   )       ) { $msg->{$id}->{info}         = ['<!>'] }
         #unless ( defined( $msg->{$id}->{client} )       ) { $msg->{$id}->{client}       =  '<!>'  }
 
         if ( defined( $msg->{$id}->{mailscanner} ) ) {
@@ -456,16 +498,24 @@ sub printmailinfo {
             unless ( defined( $msg->{$id}->{spam_score_detail} ) ) { $msg->{$id}->{spam_score_detail}   = '<!>' }
         }
 
-
-
-        PrintMailInfo_csv() if $csv;
-        PrintMailInfo_visual() unless $csv;
+        if ( $csv ) {
+            PrintMailInfo_csv();
+        }
+        elsif ( $brief ) {
+            Printmailinfo_visual('brief');
+        }
+        elsif ( $verbose ) {
+            Printmailinfo_visual_verbose();
+        }
+        else {
+            Printmailinfo_visual('standard');
+        }
         $entries++;
     }
 
     #After processing the mail we delete all traces of it...
     unless ( checkpostgreytriple() eq "not ok" ) { 
-        if ( defined( $postgreylist->{$_} ) { delete $postgreylist->{$_} };
+        if ( defined( $postgreylist->{$_} ) ) { delete $postgreylist->{$_} };
     }
     delete $msg->{$id};
     delete $mapper->{$mapperid} if defined( $mapperid );
@@ -475,6 +525,7 @@ sub printmailinfo {
 ###
 # Parsing the postfix log line extracting all necessary info into the mailbox hash.
 sub parsepostfix {
+
     #Check if mail id is a mail requeued from Mailscanner switching id to original mail-id..
     if ( defined( $mapper->{$id} ) ) { 
         $mapperid = $id; # Saving the original id if we want to delete the entry below.
@@ -487,24 +538,22 @@ sub parsepostfix {
     if ( $cmd eq 'qmgr' ) {
         if ( $line =~ /^removed$/ ) {
             $msg->{$id}->{deleted_time} = $time;
-	    print "\tDebug: Got remove info, printing mail.\n" if $xdebug;
+	        print "\tDebug: Got remove info, printing mail.\n" if $xdebug;
             printmailinfo( $msg->{$id} ); 
         } 
         else {
             $msg->{$id}->{from} = $1 if $line =~ /^from=<([^>]+)>/;
             $msg->{$id}->{size} = $1 if $line =~ /size=(\d+)/;
             $msg->{$id}->{first_seen} = $time;
-	    print "\tDebug: Got from/size/first_seen info.\n" if $xdebug;
+	        print "\tDebug: Got from/size/first_seen info.\n" if $xdebug;
         }
-
     }
     elsif ( $cmd eq 'cleanup' ) {
         $msg->{$id}->{first_seen} = $time;
         $msg->{$id}->{msgid} = $1 if $line =~ /^message-id=(<[^>]+>)/ ;
         $msg->{$id}->{from} = $1 if $line =~ /from=<([^>]+)>/;
         push @{ $msg->{$id}->{to} }, $1 if $line =~/to=<([^>]+)>/;
-        #print "hiha: $line\n" if $line =~/to=<([^>]+)>/;
-	print "\tDebug: Got first_seen,msgid,from,to info.\n" if $xdebug;
+	    print "\tDebug: Got first_seen,msgid,from,to info.\n" if $xdebug;
     }
     elsif ( $cmd eq 'smtpd'  && $line =~ /^(reject):/ ) {
         push @{ $msg->{$id}->{status} }, $1;
@@ -515,18 +564,17 @@ sub parsepostfix {
         $msg->{$id}->{deleted_time} = $time;
         $msg->{$id}->{from} = $1 if $line =~ /from=<([^>]+)>/;
         $msg->{$id}->{size} = 'unknown';
-	print "\tDebug: Got reject info, printing mail.\n" if $xdebug;
+	    print "\tDebug: Got reject info, printing mail.\n" if $xdebug;
         printmailinfo( $msg->{$id} ); 
-
     }
     elsif ( $cmd =~ /(virtual|smtp|error|local)/) {
-        push @{ $msg->{$id}->{to}  }, $1 if $line =~/to=<([^>]+)>/ && uniquerecipient( $1 ) eq "yes";
+        push @{ $msg->{$id}->{to}     }, $1 if $line =~ /to=<([^>]+)>/ && uniquerecipient( $1 ) eq "yes";
         push @{ $msg->{$id}->{delay}  }, $1 if $line =~ /delay=(\d+)/;
         push @{ $msg->{$id}->{delay}  }, $1 if $line =~ /delay=(\d+\.\d+)/;
         push @{ $msg->{$id}->{status} }, $1 if $line =~ /status=(\w+)/;
-        push @{ $msg->{$id}->{relay} }, $1 if $line =~ /relay=(.*?), /;
+        push @{ $msg->{$id}->{relay}  }, $1 if $line =~ /relay=(.*?), /;
 
-        #$msg->{$id}->{client} = $1 if $line =~ /client=.*\[(\d{1,3}.\d{1,3}\.\d{1,3}\.\d{1,3})\]/;
+        $msg->{$id}->{client} = $1 if $line =~ /client=.*\[(\d{1,3}.\d{1,3}\.\d{1,3}\.\d{1,3})\]/;
 
         # Adjust relay info to "thrash" if mail is bounced.
         if ( defined( $msg->{$id}->{status}[$#{$msg->{$id}->{status}}] ) ) {
@@ -535,7 +583,7 @@ sub parsepostfix {
             }
         }
         push @{ $msg->{$id}->{info}   }, $1 if $line =~ /(\(.*\)$)/;
-	print "\tDebug: Got delay/relay/status info.\n" if $xdebug;
+	    print "\tDebug: Got client/delay/relay/status info.\n" if $xdebug;
     }
 }
 
@@ -560,7 +608,8 @@ sub parsemailscanner {
 	    print "\tDebug: Got Mailscanner = TRUE\n" if $xdebug;
     }
 
-    if ( $line =~ /\((.*\@.*)\) to .* (is not spam|is spam|is too big|is whitelisted|is blacklisted)/ ) {
+    #if ( $line =~ /\((.*\@.*)\) to .* (is not spam|is spam|is too big|is whitelisted|is blacklisted)/ ) {
+    if ( $line =~ /\((.*)\) to .* (is not spam|is spam|is too big|is whitelisted|is blacklisted)/ ) {
         $msg->{$id}->{scanned} = 'TRUE';
         $msg->{$id}->{from} = $1;
         $msg->{$id}->{spam_status} = $2;
@@ -611,6 +660,7 @@ sub parsepostgrey {
 
 sub ParseLine {
     $lines++;
+    chomp( $_ );
     # Check if line is in a known Postfix format:
     if ( $_[0] =~ /^(\w\w\w\s{1,2}\d{1,2} \d\d:\d\d:\d\d) (.*) postfix\/(\w+)\[\d+\]: ([0-9A-Z]+): (.*)/ ) {
         ( $time, $server, $cmd, $id, $line ) = ( $1, $2, $3, $4, $5 );
@@ -698,14 +748,16 @@ unless ( $csv ) {
 }
 
 
-# Process whatever is thrown at us via STDIN:
-#while ( <STDIN> ) {
-#    &ParseLine( $_ );
-#    undef( $logfile );
-#}
+# Process whatever is thrown at us via STDIN if $stdin-flag is set:
+if ( $stdin ) {
+    while ( <STDIN> ) {
+        &ParseLine( $_ );
+        undef( $logfile );
+    }
+}
 
 # If you want me to search logfiles:
-if ( defined( $logfile ) ) {
+elsif ( defined( $logfile ) ) {
     for $i ( 1 .. $NumberOfFiles-1 ) {	
         $i = $NumberOfFiles - $i;  # We want to parse oldest logs first.
             print "Reading $path$logfile.$i" if $debug;
@@ -719,14 +771,6 @@ if ( defined( $logfile ) ) {
     if ( -e "$path$logfile" ) { &readfile( "$path$logfile" ); }
     else { print "Warning!  File not found: $path$logfile!\n"; }
 }
-
-
-# Or process whatever is thrown at us via STDIN:
-#else {
-#    while ( <STDIN> ) {
-#        &ParseLine( $_ );
-#    }
-#}
 
 
 my $entryname = 'entries';
