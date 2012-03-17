@@ -259,11 +259,13 @@ sub PrintMailInfo_csv() {
 
 
 sub checkstatuscolor {
-    return $col->{bounced} if $_[0] =~ /bounced/;
-    return $col->{sent}    if $_[0] =~ /sent/;
-    return $col->{spam}    if $_[0] =~ /is spam/;
-    return $col->{notspam} if $_[0] =~ /is not spam/;
-    return $col->{reject}  if $_[0] =~ /reject/;
+    if ( defined( $_[0] ) ) {
+        return $col->{bounced} if $_[0] =~ /bounced/;
+        return $col->{sent}    if $_[0] =~ /sent/;
+        return $col->{spam}    if $_[0] =~ /is spam/;
+        return $col->{notspam} if $_[0] =~ /is not spam/;
+        return $col->{reject}  if $_[0] =~ /reject/;
+    }
     return 'MAGENTA';
 }
 
@@ -447,10 +449,15 @@ sub Printmailinfo_visual_verbose {
         }
 
         $col->{mystatus} = checkstatuscolor( $msg->{$id}->{status}[$i] );
-        print color "$col->{mystatus}" if $color; printf " Status:%s", $msg->{$id}->{status}[$i];
+        print color "$col->{mystatus}" if $color;
+        printf " Status:%s", $msg->{$id}->{status}[$i];
 
-        print color "$col->{info}"     if $color;
-        printf " Sent to:%s\n\t  Info:%s\n", $msg->{$id}->{relay}[$i], $msg->{$id}->{info}[$i];
+        # Sent to
+        print color "$col->{info}" if $color;
+        printf " Sent to:%s", $msg->{$id}->{relay}[$i] if $msg->{$id}->{status}[$i] !~ /reject/;
+
+        #Info
+        printf "\n\t  Info:%s\n", $msg->{$id}->{info}[$i];
 
         if ( $tlsinfo ) {
             print "\tEncryption: ";
@@ -517,6 +524,7 @@ sub printmailinfo {
     unless ( checkpostgreytriple() eq "not ok" ) { 
         if ( defined( $postgreylist->{$_} ) ) { delete $postgreylist->{$_} };
     }
+    print "id = $id, mapper->{mapperid}= $mapper->{$mapperid}, mapperid = $mapperid" if $i =~ /B07E8D81E/;
     delete $msg->{$id};
     delete $mapper->{$mapperid} if defined( $mapperid );
 }
@@ -525,11 +533,13 @@ sub printmailinfo {
 ###
 # Parsing the postfix log line extracting all necessary info into the mailbox hash.
 sub parsepostfix {
+    print "\tDEBUG: ID = $id\n" if $id =~ /B07E8D81E/;
 
     #Check if mail id is a mail requeued from Mailscanner switching id to original mail-id..
     if ( defined( $mapper->{$id} ) ) { 
         $mapperid = $id; # Saving the original id if we want to delete the entry below.
-            $id = $mapper->{$id};
+        $id = $mapper->{$id};
+        print "\tMAPPER: ID = $id\n" if $id =~ /B07E8D81E/;
     }
 
     # Find message or create new hash
@@ -563,6 +573,7 @@ sub parsepostfix {
         push @{ $msg->{$id}->{relay} }, 'Never received message.';
         $msg->{$id}->{deleted_time} = $time;
         $msg->{$id}->{from} = $1 if $line =~ /from=<([^>]+)>/;
+        $msg->{$id}->{client} = $1 if $line =~ /RCPT from (.*]): /;
         $msg->{$id}->{size} = 'unknown';
 	    print "\tDebug: Got reject info, printing mail.\n" if $xdebug;
         printmailinfo( $msg->{$id} ); 
@@ -634,7 +645,7 @@ sub parsemailscanner {
         printmailinfo( $msg->{$id} );
 	print "\tDebug: Got spam quarantine info.\n" if $xdebug;
     }
-    elsif ( $line =~ /^Requeue: ([0-9A-F]+)\.[0-9A-F]+ to ([0-9A-F]+)$/ ) {
+    elsif ( $line =~ /Requeue: ([0-9A-F]+)\.[0-9A-F]+ to ([0-9A-F]+)/ ) {
         $mapper->{$2} = $1;
 	print "\tDebug: Got requeue info.\n" if $xdebug;
     }
