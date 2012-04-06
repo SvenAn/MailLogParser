@@ -129,7 +129,7 @@ unless($@) { $gz_loaded = 1; print "Debug: Compress::Zlib loaded.\n" if $debug; 
 
 
 # All sorts of variables
-my ( $i, $j, $msg, $time, $server, $cmd, $id, $line, $Mailscanner, $mapper, $mapperid, $starttime,
+my ( $i, $j, $msg, $time, $server, $cmd, $id, $line, $Mailscanner, $starttime, $readytoprint,
     $endtime, $postgreylist, $Postgrey, $tls, $to );
 my $lines = 0;
 my $entries = 0;
@@ -373,13 +373,19 @@ sub Printmailinfo_visual {
     # if there are more than one recipient we want to print them on separate lines:
     if ( $#{ $msg->{$id}->{to} } > 0 ) {
         for $i ( 1..$#{ $msg->{$id}->{info} } ) {
-            print color "$col->{to}" if $color; 
-            printf "\n\t\t\t\t\t\t\t      To:%-40s", @{ $msg->{$id}->{to} }[$i];
+
             if ( $color ) {
                 $col->{mystatus} = checkstatuscolor( $msg->{$id}->{status}[0] );
                 print color "$col->{mystatus}";
             }
-            printf " Status:%s", $msg->{$id}->{status}[0];
+            if ( $type ne 'brief' ) {
+                printf "\n\t\t\t     %s", $msg->{$id}->{status}[0];
+            }
+            else {
+                printf "\n\t\t%s", $msg->{$id}->{status}[0];
+            }
+            print color "$col->{to}" if $color; 
+            printf "\t\t\t\t\t\t    To:%-40s", @{ $msg->{$id}->{to} }[$i];
         }
     }
     print "\n";
@@ -437,7 +443,7 @@ sub Printmailinfo_visual_verbose {
     #Hack to remove extra recipient info only needed if mail is rejected og sent to quarantine:
     #shift( @{ $msg->{$id}->{to} } ) if $#{ $msg->{$id}->{to} } > $#{ $msg->{$id}->{status} };
 
-    for $i ( 0..$#{ $msg->{$id}->{info} } ) {
+    for $i ( 0..$#{ $msg->{$id}->{to} } ) {
 
         print color "$col->{to}"   if $color; 
         printf "\t  To: %s", $msg->{$id}->{to}[$i]; 
@@ -457,8 +463,12 @@ sub Printmailinfo_visual_verbose {
         printf " Sent to:%s", $msg->{$id}->{relay}[$i] if $msg->{$id}->{status}[$i] !~ /reject/;
 
         #Info
+        if ( $msg->{$id}->{info}[$i] =~ /(.*;) http:\/\// ) { $msg->{$id}->{info}[$i] = $1 };
         printf "\n\t  Info:%s\n", $msg->{$id}->{info}[$i];
-
+        if ( defined( $msg->{$id}->{extinfo}[$i] ) ) {
+            printf "\t  Info:%s\n", $msg->{$id}->{extinfo}[$i];
+        }
+   
         if ( $tlsinfo ) {
             print "\tEncryption: ";
             if ( defined( $tls->{$msg->{$id}->{relay}[$i]}->{relay} ) ) {
@@ -496,7 +506,7 @@ sub printmailinfo {
         unless ( defined( $msg->{$id}->{status} )       ) { $msg->{$id}->{status}       = ['<!>'] }
         unless ( defined( $msg->{$id}->{relay}  )       ) { $msg->{$id}->{relay}        = ['<!>'] }
         unless ( defined( $msg->{$id}->{info}   )       ) { $msg->{$id}->{info}         = ['<!>'] }
-        #unless ( defined( $msg->{$id}->{client} )       ) { $msg->{$id}->{client}       =  '<!>'  }
+        unless ( defined( $msg->{$id}->{client} )       ) { $msg->{$id}->{client}       =  '<!>'  }
 
         if ( defined( $msg->{$id}->{mailscanner} ) ) {
             unless ( defined( $msg->{$id}->{spam_status} )       ) { $msg->{$id}->{spam_status}         = '<!>' }
@@ -524,23 +534,15 @@ sub printmailinfo {
     unless ( checkpostgreytriple() eq "not ok" ) { 
         if ( defined( $postgreylist->{$_} ) ) { delete $postgreylist->{$_} };
     }
-    print "id = $id, mapper->{mapperid}= $mapper->{$mapperid}, mapperid = $mapperid" if $i =~ /B07E8D81E/;
+    print "\tDeleting $id\n" if $debug;
+    delete $msg->{ $msg->{$id}->{id1} } if defined $msg->{$id}->{id1};
     delete $msg->{$id};
-    delete $mapper->{$mapperid} if defined( $mapperid );
 }
 
 
 ###
 # Parsing the postfix log line extracting all necessary info into the mailbox hash.
 sub parsepostfix {
-    print "\tDEBUG: ID = $id\n" if $id =~ /B07E8D81E/;
-
-    #Check if mail id is a mail requeued from Mailscanner switching id to original mail-id..
-    if ( defined( $mapper->{$id} ) ) { 
-        $mapperid = $id; # Saving the original id if we want to delete the entry below.
-        $id = $mapper->{$id};
-        print "\tMAPPER: ID = $id\n" if $id =~ /B07E8D81E/;
-    }
 
     # Find message or create new hash
     $msg->{$id} = $msg->{$id} ||= { id => $id, time => $1, server => $2, to => [ ] };
@@ -549,19 +551,24 @@ sub parsepostfix {
         if ( $line =~ /^removed$/ ) {
             $msg->{$id}->{deleted_time} = $time;
 	        print "\tDebug: Got remove info, printing mail.\n" if $xdebug;
-            printmailinfo( $msg->{$id} ); 
+            #printmailinfo( $msg->{$id} ); 
+            $readytoprint->{$id} = 1; 
         } 
         else {
-            $msg->{$id}->{from} = $1 if $line =~ /^from=<([^>]+)>/;
+            print "\tDebug: parsing $line\n" if $xdebug;
+            $msg->{$id}->{from} = $1 if $line =~ /from=<([^>]+)>/;
+            $msg->{$id}->{from} = $1 if $line =~ /from=(\<\>)/;
             $msg->{$id}->{size} = $1 if $line =~ /size=(\d+)/;
             $msg->{$id}->{first_seen} = $time;
 	        print "\tDebug: Got from/size/first_seen info.\n" if $xdebug;
+	        print "\tDebug: $msg->{$id}->{from}, $msg->{$id}->{size}, $msg->{$id}->{first_seen}\n" if $xdebug;
         }
     }
     elsif ( $cmd eq 'cleanup' ) {
         $msg->{$id}->{first_seen} = $time;
         $msg->{$id}->{msgid} = $1 if $line =~ /^message-id=(<[^>]+>)/ ;
         $msg->{$id}->{from} = $1 if $line =~ /from=<([^>]+)>/;
+        $msg->{$id}->{from} = $1 if $line =~ /from=(\<\>)/;
         push @{ $msg->{$id}->{to} }, $1 if $line =~/to=<([^>]+)>/;
 	    print "\tDebug: Got first_seen,msgid,from,to info.\n" if $xdebug;
     }
@@ -577,6 +584,7 @@ sub parsepostfix {
         $msg->{$id}->{size} = 'unknown';
 	    print "\tDebug: Got reject info, printing mail.\n" if $xdebug;
         printmailinfo( $msg->{$id} ); 
+        #$readytoprint->{$id} = 1; 
     }
     elsif ( $cmd =~ /(virtual|smtp|error|local)/) {
         push @{ $msg->{$id}->{to}     }, $1 if $line =~ /to=<([^>]+)>/ && uniquerecipient( $1 ) eq "yes";
@@ -593,7 +601,10 @@ sub parsepostfix {
                 $msg->{$id}->{relay}[$#{$msg->{$id}->{relay}}] = 'thrashcan';
             }
         }
-        push @{ $msg->{$id}->{info}   }, $1 if $line =~ /(\(.*\)$)/;
+        push @{ $msg->{$id}->{info} }, $1 if $line =~ /status=.*(\(.*\)$)/;
+
+        push @{ $msg->{$id}->{extinfo} }, $1 if $line =~ /host .* said: (.*)/;
+
 	    print "\tDebug: Got client/delay/relay/status info.\n" if $xdebug;
     }
 }
@@ -643,11 +654,14 @@ sub parsemailscanner {
         $msg->{$id}->{info} = ['none'];
         $msg->{$id}->{deleted_time} = "$time";
         printmailinfo( $msg->{$id} );
-	print "\tDebug: Got spam quarantine info.\n" if $xdebug;
+        #$readytoprint->{$id} = 1; 
+	    print "\tDebug: Got spam quarantine info.\n" if $xdebug;
     }
     elsif ( $line =~ /Requeue: ([0-9A-F]+)\.[0-9A-F]+ to ([0-9A-F]+)/ ) {
-        $mapper->{$2} = $1;
-	print "\tDebug: Got requeue info.\n" if $xdebug;
+        $msg->{$2} = $msg->{$1};
+        $msg->{$2}->{id1} = $1;
+        delete $msg->{$1};
+	    print "\tDebug: Got requeue info. $1($id) -> $2\n" if $debug;
     }
 }
 
@@ -658,11 +672,11 @@ sub parsepostgrey {
     if ( $line =~ /triplet found, delay=(\d+), client_name=(.*?), client_address=(.*?), sender=(.*?), recipient=(.*)$/ ) {
         #$i = "$3-$4-$5";
         $i = "$4-$5";
-        $postgreylist->{$i}->{time} = $time;
-        $postgreylist->{$i}->{delay} = $1;
+        $postgreylist->{$i}->{time}           = $time;
+        $postgreylist->{$i}->{delay}          = $1;
         $postgreylist->{$i}->{client_address} = $3;
-        $postgreylist->{$i}->{sender} = $4;
-        $postgreylist->{$i}->{recipient} = $5;
+        $postgreylist->{$i}->{sender}         = $4;
+        $postgreylist->{$i}->{recipient}      = $5;
         print "Got: $postgreylist->{$i}->{time}, $postgreylist->{$i}->{client_address}, $postgreylist->{$i}->{sender},
              $postgreylist->{$i}->{recipient}!\n" if $xdebug;
     }
@@ -704,6 +718,17 @@ sub ParseLine {
 
     else {
         print "\tDebug: No known format: <$_>\n" if $xdebug;
+    }
+
+    # This little loop checks if there are any mail that has been marked as 'ready to print', and that mlp has
+    # parsed 10 additional lines to make sure that all info about the spesific mail has been caught. 
+    for $i ( keys %$readytoprint ) {
+        $readytoprint->{$i}++;
+        if ( $readytoprint->{$i} == 10 ) {
+            $id = $i;
+            printmailinfo( $msg->{$i} );
+            delete $readytoprint->{$i};
+        }
     }
 }
 
@@ -767,23 +792,38 @@ if ( $stdin ) {
     }
 }
 
+
 # If you want me to search logfiles:
 elsif ( defined( $logfile ) ) {
     for $i ( 1 .. $NumberOfFiles-1 ) {	
         $i = $NumberOfFiles - $i;  # We want to parse oldest logs first.
-            print "Reading $path$logfile.$i" if $debug;
+        print "Reading $path$logfile.$i" if $debug;
 
-        if ( -e "$path$logfile.$i.gz" ) {  print ".gz\n" if $debug; readgzfile( "$path$logfile.$i.gz" ); }
-        elsif ( -e "$path$logfile.$i.bz" ) { print ".bz2\n" if $debug; readbzfile( "$path$logfile.$i.bz2" );  }
-        elsif ( -e "$path$logfile.$i" ) { print "\n" if $debug; readfile( "$path$logfile.$i" ); }
+        if    ( -e "$path$logfile.$i.gz" ) { print ".gz\n"  if $debug; readgzfile( "$path$logfile.$i.gz"  ); }
+        elsif ( -e "$path$logfile.$i.bz" ) { print ".bz2\n" if $debug; readbzfile( "$path$logfile.$i.bz2" ); }
+        elsif ( -e "$path$logfile.$i" )    { print "\n"     if $debug; readfile(   "$path$logfile.$i"     ); }
         else { print "Warning!  File not found: $path$logfile.$i(or .gz or .bz2)!\n"; }
     }
+
     print "Reading $path$logfile\n" if $debug;
-    if ( -e "$path$logfile" ) { &readfile( "$path$logfile" ); }
-    else { print "Warning!  File not found: $path$logfile!\n"; }
+    if ( -e "$path$logfile" ) { 
+        &readfile( "$path$logfile" );
+    }
+    else {
+        print "Warning!  File not found: $path$logfile!\n";
+    }
 }
 
 
+# time to empty any mail that still waits in queue to be handled:
+for $i ( keys %$readytoprint ) {
+    $id = $i;
+    printmailinfo( $msg->{$i} );
+    delete $readytoprint->{$i};
+}
+
+
+# Time to print footer info:
 my $entryname = 'entries';
 unless ( $csv ) {
     $endtime = formattime( time - $starttime );
@@ -816,6 +856,4 @@ for $i ( keys %$msg ) {
         print "$j\n";
     }
 }
-
-
-print "Done. $lines lines parsed.\n\n";
+print "Done.\n";
