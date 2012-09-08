@@ -13,6 +13,7 @@ use strict;
 use warnings;
 use File::Spec;
 use POSIX qw(setsid);
+use IO::Select;
 use Term::ANSIColor;
 local $Term::ANSIColor::AUTORESET = 1;
 #use Compress::Zlib;
@@ -891,7 +892,10 @@ unless ( $csv ) {
 
 
 # Process whatever is thrown at us via STDIN if $stdin-flag is set:
-if ( $stdin ) {
+$stdin = IO::Select->new();
+$stdin->add(\*STDIN);
+
+if ($stdin->can_read(.5)) {
     print "Reading from <stdin>.\n" if ( $debug || $maillog_filename );
     while ( <STDIN> ) {
         &ParseLine( $_ );
