@@ -1,21 +1,25 @@
 #!/usr/bin/perl -w
-###             mlp.pl v0.002                   ###
+###             mlp.pl                          ###
 # MailLogParse by Sven Andreassen sven@tideli.com #
 # a small utility to parse e-mail log files       #
 # printing all necessary info about an e-mail     #
 # in a simple, human readable format.             #
 ###                                             ###
 
+my $version = 'v.004';
+
 
 use strict;
 use warnings;
 use File::Spec;
+use POSIX qw(setsid);
 use Term::ANSIColor;
+local $Term::ANSIColor::AUTORESET = 1;
 #use Compress::Zlib;
 
 
 my $helptext = <<EOF;
-###  MailLogParse v0.002 by Sven Andreassen ###
+###  MailLogParse $version by Sven Andreassen ###
 ##					     ##
 
 Syntax:
@@ -70,7 +74,8 @@ my $col = {
 };
 
 
-my ( $verbose, $brief, $file, $help, $csv, $debug, $xdebug, $color, $stdin, $tlsinfo );
+my ( $verbose, $brief, $file, $help, $csv, $debug, $xdebug, $color, $stdin, $tlsinfo,
+    $date_change, $my_printed_date, $maillog_filename, $display_mailserver );
 
 
 &ReadConfigFile(); # We want to read default config before processing command line options;
@@ -129,12 +134,26 @@ unless($@) { $gz_loaded = 1; print "Debug: Compress::Zlib loaded.\n" if $debug; 
 
 
 # All sorts of variables
-my ( $i, $j, $msg, $time, $server, $cmd, $id, $line, $Mailscanner, $starttime, $readytoprint,
+my ( $i, $j, $msg, $date, $time, $server, $cmd, $id, $line, $Mailscanner, $starttime, $readytoprint,
     $endtime, $postgreylist, $Postgrey, $tls, $to );
 my $lines = 0;
 my $entries = 0;
 my @config;
 my $delaywarn = 600; #seconds..
+$my_printed_date = "none";
+
+
+# Makes sure we tidy up when closing down..
+sub shutdown_prog {
+    print"\n";
+    &printfooter();
+    print color 'reset' if $color;
+    exit(0);
+}
+$SIG{'INT'} = 'shutdown_prog';
+$SIG{'TERM'} = 'shutdown_prog';
+$SIG{'QUIT'} = 'shutdown_prog';
+
 
 
 ###
@@ -171,6 +190,9 @@ sub parseconfig {
                 $line =~ /^debug.*=\s*(true|on)/i   && do {  $debug = $1; last SWITCH; }; 
                 $line =~ /^Xdebug.*=\s*(true|on)/i   && do {  $xdebug = $1; last SWITCH; }; 
                 $line =~ /^color.*=\s*(true|on)/i   && do {  $color = $1; last SWITCH; }; 
+                $line =~ /^Display_date_change.*=\s*(true|on)/i   && do {  $date_change = $1; last SWITCH; }; 
+                $line =~ /^Display_maillog_filename.*=\s*(true|on)/i   && do {  $maillog_filename = $1; last SWITCH; }; 
+                $line =~ /^Display_mailserver.*=\s*(true|on)/i   && do {  $display_mailserver = $1; last SWITCH; }; 
                 $line =~ /^default_logpath\s*=\s*(\S+)/i   && do { 
                     $path = $1;
                     if ( $path !~ /\/$/ ) { $path .= "/"; }
@@ -338,6 +360,15 @@ sub formatnr {
 }
 
 
+sub check_date_change {
+    if ( $my_printed_date ne $date ) {
+        print color "$col->{headline}" if $color;
+        print "Parcing date: $date\n";
+        $my_printed_date = $date;
+    }
+}
+
+
 ###
 # Printing the result in brief  and standard format.
 sub Printmailinfo_visual {
@@ -348,6 +379,12 @@ sub Printmailinfo_visual {
     # Time
     print color "$col->{time}" if $color;
     printf "%-12s", $msg->{$id}->{deleted_time};
+
+    # Mailserver
+    if ( $display_mailserver ) {
+        print color "$col->{time}" if $color;
+        printf "  %s ", $msg->{$id}->{server};
+    }
 
     # print ID unless type = brief.
     if ( $type ne 'brief' ) {
@@ -368,7 +405,7 @@ sub Printmailinfo_visual {
 
     # To
     print color "$col->{to}" if $color; 
-    printf " To:%s", @{ $msg->{$id}->{to} }[0];
+    printf "  To:%s", @{ $msg->{$id}->{to} }[0];
 
     # if there are more than one recipient we want to print them on separate lines:
     if ( $#{ $msg->{$id}->{to} } > 0 ) {
@@ -385,7 +422,7 @@ sub Printmailinfo_visual {
                 printf "\n\t\t%s", $msg->{$id}->{status}[0];
             }
             print color "$col->{to}" if $color; 
-            printf "\t\t\t\t\t\t    To:%-40s", @{ $msg->{$id}->{to} }[$i];
+            printf "\t\t\t\t\t\t\tTo:%-40s", @{ $msg->{$id}->{to} }[$i];
         }
     }
     print "\n";
@@ -399,9 +436,20 @@ sub Printmailinfo_visual_verbose {
     print color "$col->{time}" if $color;
     printf "%-12s", $msg->{$id}->{deleted_time};
 
+    # Mailserver
+    if ( $display_mailserver ) {
+        print color "$col->{time}" if $color;
+        printf "  %s ", $msg->{$id}->{server};
+    }
+
     # Id
     print color "$col->{id}" if $color;
-    printf " %-12s", $msg->{$id}->{id};
+    if ( "$id" eq "$msg->{$id}->{id}" ) { 
+        printf " %-12s", $msg->{$id}->{id};
+    }
+    else {
+        printf " %s %s", $msg->{$id}->{id}, $id;
+    }
 
     # Client
     print color "$col->{id}" if $color;
@@ -440,6 +488,8 @@ sub Printmailinfo_visual_verbose {
     print color "$col->{from}" if $color; 
     printf "\tFrom: %s\n", $msg->{$id}->{from};
 
+    printf "\tSubject: %s\n", $msg->{$id}->{subject} if defined( $msg->{$id}->{subject} );
+
     #Hack to remove extra recipient info only needed if mail is rejected og sent to quarantine:
     #shift( @{ $msg->{$id}->{to} } ) if $#{ $msg->{$id}->{to} } > $#{ $msg->{$id}->{status} };
 
@@ -463,11 +513,17 @@ sub Printmailinfo_visual_verbose {
         printf " Sent to:%s", $msg->{$id}->{relay}[$i] if $msg->{$id}->{status}[$i] !~ /reject/;
 
         #Info
-        if ( $msg->{$id}->{info}[$i] =~ /(.*;) http:\/\// ) { $msg->{$id}->{info}[$i] = $1 };
-        printf "\n\t  Info:%s\n", $msg->{$id}->{info}[$i];
+        if ( defined( $msg->{$id}->{dovecotinfo}[$i] ) ) {
+            printf "\n\t  Info: %s\n", $msg->{$id}->{dovecotinfo}[$i];
+        }
+        else {
+            if ( $msg->{$id}->{info}[$i] =~ /(.*;) http:\/\// ) { $msg->{$id}->{info}[$i] = $1 };
+            printf "\n\t  Info:%s\n", $msg->{$id}->{info}[$i];
+        }
         if ( defined( $msg->{$id}->{extinfo}[$i] ) ) {
             printf "\t  Info:%s\n", $msg->{$id}->{extinfo}[$i];
         }
+        #printf "\n\t  Info:%s\n", $msg->{$id}->{dovecotinfo}[$i];# if defined( $msg->{$id}->{dovecotinfo}[$i]);
    
         if ( $tlsinfo ) {
             print "\tEncryption: ";
@@ -507,6 +563,7 @@ sub printmailinfo {
         unless ( defined( $msg->{$id}->{relay}  )       ) { $msg->{$id}->{relay}        = ['<!>'] }
         unless ( defined( $msg->{$id}->{info}   )       ) { $msg->{$id}->{info}         = ['<!>'] }
         unless ( defined( $msg->{$id}->{client} )       ) { $msg->{$id}->{client}       =  '<!>'  }
+        #unless ( defined( $msg->{$id}->{dovecotinfo} )  ) { $msg->{$id}->{dovecotinfo}  = ['<!>'] }
 
         if ( defined( $msg->{$id}->{mailscanner} ) ) {
             unless ( defined( $msg->{$id}->{spam_status} )       ) { $msg->{$id}->{spam_status}         = '<!>' }
@@ -532,7 +589,7 @@ sub printmailinfo {
 
     #After processing the mail we delete all traces of it...
     unless ( checkpostgreytriple() eq "not ok" ) { 
-        if ( defined( $postgreylist->{$_} ) ) { delete $postgreylist->{$_} };
+        if ( defined( $postgreylist->{$_[0]} ) ) { delete $postgreylist->{$_[0]} };
     }
     print "\tDeleting $id\n" if $debug;
     delete $msg->{ $msg->{$id}->{id1} } if defined $msg->{$id}->{id1};
@@ -543,9 +600,11 @@ sub printmailinfo {
 ###
 # Parsing the postfix log line extracting all necessary info into the mailbox hash.
 sub parsepostfix {
+    # We want $time to contain both $date and $time:
+    $time = "$date $time";
 
     # Find message or create new hash
-    $msg->{$id} = $msg->{$id} ||= { id => $id, time => $1, server => $2, to => [ ] };
+    $msg->{$id} = $msg->{$id} ||= { id => $id, time => $date, server => $server, to => [ ] };
 
     if ( $cmd eq 'qmgr' ) {
         if ( $line =~ /^removed$/ ) {
@@ -566,7 +625,8 @@ sub parsepostfix {
     }
     elsif ( $cmd eq 'cleanup' ) {
         $msg->{$id}->{first_seen} = $time;
-        $msg->{$id}->{msgid} = $1 if $line =~ /^message-id=(<[^>]+>)/ ;
+        #$msg->{$id}->{msgid} = $1 if $line =~ /^message-id=(<[^>]+>)/ ;
+        $msg->{$id}->{msgid} = $1 if $line =~ /^message-id=<(.*)>/ ;
         $msg->{$id}->{from} = $1 if $line =~ /from=<([^>]+)>/;
         $msg->{$id}->{from} = $1 if $line =~ /from=(\<\>)/;
         push @{ $msg->{$id}->{to} }, $1 if $line =~/to=<([^>]+)>/;
@@ -663,7 +723,11 @@ sub parsemailscanner {
         delete $msg->{$1};
 	    print "\tDebug: Got requeue info. $1($id) -> $2\n" if $debug;
     }
+    elsif ( $line =~ /with subject (.*)/ ) {
+         $msg->{$id}->{subject} = $1;
+    }
 }
+
 
 
 ###
@@ -683,13 +747,27 @@ sub parsepostgrey {
 }
 
 
+###
+# Parsing the dovecot log line extracting all necessary info into the mailbox hash.
+sub parsedovecot {
+    if ( $line =~ /msgid=<(.*)>: (.*)/ ) {
+        for $i ( keys %$msg ) {
+            if ( defined( $msg->{$i}->{msgid} ) && "$msg->{$i}->{msgid}" eq "$1" ) { 
+                    push @{ $msg->{$i}->{dovecotinfo} }, $2;
+            }
+        }    
+    }
+}
+
+
 sub ParseLine {
     $lines++;
-    chomp( $_ );
+    chomp( $_[0] );
     # Check if line is in a known Postfix format:
-    if ( $_[0] =~ /^(\w\w\w\s{1,2}\d{1,2} \d\d:\d\d:\d\d) (.*) postfix\/(\w+)\[\d+\]: ([0-9A-Z]+): (.*)/ ) {
-        ( $time, $server, $cmd, $id, $line ) = ( $1, $2, $3, $4, $5 );
+    if ( $_[0] =~ /^(\w\w\w\s{1,2}\d{1,2}) (\d\d:\d\d:\d\d) (.*) postfix\/(\w+)\[\d+\]: ([0-9A-Z]+): (.*)/ ) {
+        ( $date, $time, $server, $cmd, $id, $line ) = ( $1, $2, $3, $4, $5, $6 );
         print "\tDebug: Parsing (Postfix): <$_>\n" if $xdebug;
+        check_date_change() if $date_change;
         parsepostfix( $_ );
     }
 
@@ -714,6 +792,13 @@ sub ParseLine {
         ( $time, $line ) = ( $1, $2 );
         print "\tDebug: Parsing (TLS): <$_>\n" if $xdebug;
         parsetls( $_ );
+    }
+
+    # Check if line is in a known Dovecot format:
+    elsif ( $_[0] =~ /^(\w\w\w\s{1,2}\d{1,2} \d\d:\d\d:\d\d) .* dovecot: (.*)/ ) {
+        ( $time, $line ) = ( $1, $2 );
+        print "\tDebug: Parsing (dovecot): <$_>\n" if $xdebug;
+        parsedovecot( $_ );
     }
 
     else {
@@ -767,9 +852,30 @@ sub readgzfile {
     my $gz = gzopen($_[0], "r") or die "Cannot open $_[0]: $errno\n" ;
 
     while ($gz->gzreadline( $line ) > 0) {
+        print "$line" if $debug;
         ParseLine( $line );
     }
     $gz->gzclose() ;
+}
+
+
+###
+# Prints the footer:
+sub printfooter {
+    my $entryname = 'entries';
+
+    unless ( $csv ) {
+        $endtime = formattime( time - $starttime );
+        $lines = formatnr( $lines );
+        if ( $entries == 0 ) { $entries = 'No' }
+        elsif ( $entries == 1 ) { $entryname = 'entry' }
+        else { $entries = formatnr( $entries ) };
+
+        print color "$col->{headline}" if $color;
+        print "_________________________________________________\n";
+        print "Done. $lines lines parsed in $endtime. $entries $entryname found.\n" if ! $debug;
+        print color 'reset' if $color;
+    }
 }
 
 
@@ -786,6 +892,7 @@ unless ( $csv ) {
 
 # Process whatever is thrown at us via STDIN if $stdin-flag is set:
 if ( $stdin ) {
+    print "Reading from <stdin>.\n" if ( $debug || $maillog_filename );
     while ( <STDIN> ) {
         &ParseLine( $_ );
         undef( $logfile );
@@ -797,7 +904,7 @@ if ( $stdin ) {
 elsif ( defined( $logfile ) ) {
     for $i ( 1 .. $NumberOfFiles-1 ) {	
         $i = $NumberOfFiles - $i;  # We want to parse oldest logs first.
-        print "Reading $path$logfile.$i" if $debug;
+        print "Reading $path$logfile.$i\n" if ( $debug || $maillog_filename );
 
         if    ( -e "$path$logfile.$i.gz" ) { print ".gz\n"  if $debug; readgzfile( "$path$logfile.$i.gz"  ); }
         elsif ( -e "$path$logfile.$i.bz" ) { print ".bz2\n" if $debug; readbzfile( "$path$logfile.$i.bz2" ); }
@@ -805,7 +912,7 @@ elsif ( defined( $logfile ) ) {
         else { print "Warning!  File not found: $path$logfile.$i(or .gz or .bz2)!\n"; }
     }
 
-    print "Reading $path$logfile\n" if $debug;
+    print "Reading $path$logfile\n" if ( $debug || $maillog_filename );
     if ( -e "$path$logfile" ) { 
         &readfile( "$path$logfile" );
     }
@@ -815,7 +922,7 @@ elsif ( defined( $logfile ) ) {
 }
 
 
-# time to empty any mail that still waits in queue to be handled:
+# time to print any mail that still waits in queue to be handled:
 for $i ( keys %$readytoprint ) {
     $id = $i;
     printmailinfo( $msg->{$i} );
@@ -824,21 +931,7 @@ for $i ( keys %$readytoprint ) {
 
 
 # Time to print footer info:
-my $entryname = 'entries';
-unless ( $csv ) {
-    $endtime = formattime( time - $starttime );
-    $lines = formatnr( $lines );
-    if ( $entries == 0 ) { $entries = 'No' }
-    elsif ( $entries == 1 ) { $entryname = 'entry' }
-    else { $entries = formatnr( $entries ) };
-
-    print color "$col->{headline}" if $color;
-    print "_________________________________________________\n";
-    print "Done. $lines lines parsed in $endtime. $entries $entryname found.\n" if ! $debug;
-    print color 'reset' if $color;
-}
-
-
+printfooter();
 die("\n") if ! $debug;
 
 
