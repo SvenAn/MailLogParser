@@ -6,7 +6,7 @@
 # in a simple, human readable format.             #
 ###                                             ###
 
-my $version = 'v.004';
+my $version = 'v.005';
 
 
 use strict;
@@ -38,8 +38,8 @@ mlp.pl [-vblncdxdah] <mail address>
 			lines.
         "a|ansicolor" = Gives output in wonderful colors.
         "tlsinfo"     = Prints tlsinfo.
-        "stdin"       = Takes input from STDIN rather than read the log file(s).
         "h|help"      = Prints this help info and quits.
+        "warnings"    = Prints warning messages as they apppear in the log file.
 
 Example:
 	Searching for someone@ (all domains) in the seven past generations 
@@ -76,7 +76,7 @@ my $col = {
 
 
 my ( $verbose, $brief, $file, $help, $csv, $debug, $xdebug, $color, $stdin, $tlsinfo,
-    $date_change, $my_printed_date, $maillog_filename, $display_mailserver );
+    $date_change, $my_printed_date, $maillog_filename, $display_mailserver, $warnings );
 
 
 &ReadConfigFile(); # We want to read default config before processing command line options;
@@ -100,14 +100,14 @@ my $options = GetOptions (
         "xd|xdebug"   => \$xdebug,
         "a|ansicolor" => \$color,
         "tlsinfo"     => \$tlsinfo,
-        "stdin"       => \$stdin,
-        "h|help"      => \$help
+        "h|help"      => \$help,
+        "warnings"    => \$warnings
+        
 );
 my $address = $ARGV[0] || 'all';
 
 my ($volume,$path,$logfile);
 ($volume,$path,$logfile) = File::Spec->splitpath( $file ) if defined($file);
-
 
 die "$helptext" if $help;
 
@@ -194,6 +194,7 @@ sub parseconfig {
                 $line =~ /^Display_date_change.*=\s*(true|on)/i   && do {  $date_change = $1; last SWITCH; }; 
                 $line =~ /^Display_maillog_filename.*=\s*(true|on)/i   && do {  $maillog_filename = $1; last SWITCH; }; 
                 $line =~ /^Display_mailserver.*=\s*(true|on)/i   && do {  $display_mailserver = $1; last SWITCH; }; 
+                $line =~ /^Display_warnings.*=\s*(true|on)/i   && do {  $warnings = $1; last SWITCH; }; 
                 $line =~ /^default_logpath\s*=\s*(\S+)/i   && do { 
                     $path = $1;
                     if ( $path !~ /\/$/ ) { $path .= "/"; }
@@ -309,7 +310,7 @@ sub checkpostgreytriple {
 sub uniquerecipient {
         if ( defined ( $msg->{$id}->{to} ) ) {
             for $i ( 0 .. $#{ $msg->{$id}->{to} } ) {
-                if ( ${ $msg->{$id}->{to} }[$i] eq $_[0] ) { return "nope" }
+                if ( ${ $msg->{$id}->{to} }[$i] =~ /$_[0]/i ) { return "nope" }
             }
         }
         return "yes";
@@ -611,7 +612,6 @@ sub parsepostfix {
         if ( $line =~ /^removed$/ ) {
             $msg->{$id}->{deleted_time} = $time;
 	        print "\tDebug: Got remove info, printing mail.\n" if $xdebug;
-            #printmailinfo( $msg->{$id} ); 
             $readytoprint->{$id} = 1; 
         } 
         else {
@@ -764,6 +764,11 @@ sub parsedovecot {
 sub ParseLine {
     $lines++;
     chomp( $_[0] );
+
+    if (  $_[0] =~ /(warning:.*)/i && $warnings ) {
+        print "$1\n";
+    }
+
     # Check if line is in a known Postfix format:
     if ( $_[0] =~ /^(\w\w\w\s{1,2}\d{1,2}) (\d\d:\d\d:\d\d) (.*) postfix\/(\w+)\[\d+\]: ([0-9A-Z]+): (.*)/ ) {
         ( $date, $time, $server, $cmd, $id, $line ) = ( $1, $2, $3, $4, $5, $6 );
