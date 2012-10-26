@@ -6,7 +6,11 @@
 # in a simple, human readable format.             #
 ###                                             ###
 
+<<<<<<< HEAD
 my $version = 'v.006';
+=======
+my $version = 'v.005';
+>>>>>>> 8299b04c98481168691f69318aada59d72be9650
 
 
 use strict;
@@ -40,7 +44,10 @@ mlp.pl [-vblncdxdah] <mail address>
         "tlsinfo"     = Prints tlsinfo.
         "h|help"      = Prints this help info and quits.
         "warnings"    = Prints warning messages as they apppear in the log file.
+<<<<<<< HEAD
         "deferred"    = Prints failed delivery of an e-mail.
+=======
+>>>>>>> 8299b04c98481168691f69318aada59d72be9650
 
 Example:
 	Searching for someone@ (all domains) in the seven past generations 
@@ -77,8 +84,12 @@ my $col = {
 
 
 my ( $verbose, $brief, $file, $help, $csv, $debug, $xdebug, $color, $stdin, $tlsinfo,
+<<<<<<< HEAD
     $date_change, $my_printed_date, $maillog_filename, $display_mailserver, $warnings,
     $PrintRestOfMessages, $display_deferred );
+=======
+    $date_change, $my_printed_date, $maillog_filename, $display_mailserver, $warnings );
+>>>>>>> 8299b04c98481168691f69318aada59d72be9650
 
 
 &ReadConfigFile(); # We want to read default config before processing command line options;
@@ -103,8 +114,12 @@ my $options = GetOptions (
         "a|ansicolor" => \$color,
         "tlsinfo"     => \$tlsinfo,
         "h|help"      => \$help,
+<<<<<<< HEAD
         "warnings"    => \$warnings,
         "deferred"    => \$display_deferred
+=======
+        "warnings"    => \$warnings
+>>>>>>> 8299b04c98481168691f69318aada59d72be9650
         
 );
 my $address = $ARGV[0] || 'all';
@@ -187,6 +202,7 @@ sub parseconfig {
                 $line =~ /^tlstrust.*=.*'(.*)'/i   && do { $col->{tlstrust}   = $1; last SWITCH; }; 
 
                 # Default variables:
+<<<<<<< HEAD
                 $line =~ /^display_mode.*=.*brief/i                 && do { $brief = 1;                     last SWITCH; }; 
                 $line =~ /^display_mode.*=.*verbose/i               && do { $verbose = 1; undef( $brief );  last SWITCH; }; 
                 $line =~ /^logfile_name.*=\s*(\S+)/i                && do { $logfile = $1;                  last SWITCH; }; 
@@ -201,6 +217,20 @@ sub parseconfig {
                 $line =~ /^PrintRestOfMessages\s*=\s*(true|on)/i    && do { $PrintRestOfMessages = $1;      last SWITCH };
                 $line =~ /^Display_deferred_mail.*=\s*(true|on)/i   && do { $display_deferred = $1;         last SWITCH; }; 
                 $line =~ /^default_logpath\s*=\s*(\S+)/i            && do { 
+=======
+                $line =~ /^display_mode.*=.*brief/i   && do { $brief = 1; last SWITCH; }; 
+                $line =~ /^display_mode.*=.*verbose/i   && do { $verbose = 1; undef( $brief ); last SWITCH; }; 
+                $line =~ /^logfile_name.*=\s*(\S+)/i   && do { $logfile = $1; last SWITCH; }; 
+                $line =~ /^NumFilesToParse.*=\s*(\d+)/i   && do { $NumberOfFiles = $1; last SWITCH; }; 
+                $line =~ /^debug.*=\s*(true|on)/i   && do {  $debug = $1; last SWITCH; }; 
+                $line =~ /^Xdebug.*=\s*(true|on)/i   && do {  $xdebug = $1; last SWITCH; }; 
+                $line =~ /^color.*=\s*(true|on)/i   && do {  $color = $1; last SWITCH; }; 
+                $line =~ /^Display_date_change.*=\s*(true|on)/i   && do {  $date_change = $1; last SWITCH; }; 
+                $line =~ /^Display_maillog_filename.*=\s*(true|on)/i   && do {  $maillog_filename = $1; last SWITCH; }; 
+                $line =~ /^Display_mailserver.*=\s*(true|on)/i   && do {  $display_mailserver = $1; last SWITCH; }; 
+                $line =~ /^Display_warnings.*=\s*(true|on)/i   && do {  $warnings = $1; last SWITCH; }; 
+                $line =~ /^default_logpath\s*=\s*(\S+)/i   && do { 
+>>>>>>> 8299b04c98481168691f69318aada59d72be9650
                     $path = $1;
                     if ( $path !~ /\/$/ ) { $path .= "/"; }
                     last SWITCH;
@@ -321,10 +351,17 @@ sub disableregexp() {
 
 
 sub uniquerecipient {
+<<<<<<< HEAD
     my $addr = &disableregexp( $_[0] );
     if ( defined ( $msg->{$id}->{to} ) ) {
         for $i ( 0 .. $#{ $msg->{$id}->{to} } ) {
             if ( &disableregexp( ${ $msg->{$id}->{to} }[$i] ) =~ /$addr/i ) { return "nope" }
+=======
+        if ( defined ( $msg->{$id}->{to} ) ) {
+            for $i ( 0 .. $#{ $msg->{$id}->{to} } ) {
+                if ( ${ $msg->{$id}->{to} }[$i] =~ /$_[0]/i ) { return "nope" }
+            }
+>>>>>>> 8299b04c98481168691f69318aada59d72be9650
         }
     }
     return "yes";
@@ -396,10 +433,20 @@ sub Printmailinfo_visual {
     print color "$col->{time}" if $color;
     printf "%-12s", $msg->{$id}->{deleted_time};
 
+<<<<<<< HEAD
     # From
     print color "$col->{from}" if $color; 
     printf " From: %s", $msg->{$id}->{from};
 
+=======
+    # Mailserver
+    if ( $display_mailserver ) {
+        print color "$col->{time}" if $color;
+        printf "  %s ", $msg->{$id}->{server};
+    }
+
+    # print ID unless type = brief.
+>>>>>>> 8299b04c98481168691f69318aada59d72be9650
     if ( $type ne 'brief' ) {
         # Mailserver
         if ( $display_mailserver ) {
@@ -414,6 +461,7 @@ sub Printmailinfo_visual {
 
     print "\n";
 
+<<<<<<< HEAD
     # print info on each recipient.
     for $i ( 0..$#{ $msg->{$id}->{info} } ) {
 
@@ -440,6 +488,32 @@ sub Printmailinfo_visual {
                 print color "$col->{info}" if $color; 
                 printf "\n\tInfo:%s", $msg->{$id}->{info}[$i];
             }
+=======
+    # From
+    print color "$col->{from}" if $color; 
+    printf " From:%-40s", $msg->{$id}->{from};
+
+    # To
+    print color "$col->{to}" if $color; 
+    printf "  To:%s", @{ $msg->{$id}->{to} }[0];
+
+    # if there are more than one recipient we want to print them on separate lines:
+    if ( $#{ $msg->{$id}->{to} } > 0 ) {
+        for $i ( 1..$#{ $msg->{$id}->{info} } ) {
+
+            if ( $color ) {
+                $col->{mystatus} = checkstatuscolor( $msg->{$id}->{status}[0] );
+                print color "$col->{mystatus}";
+            }
+            if ( $type ne 'brief' ) {
+                printf "\n\t\t\t     %s", $msg->{$id}->{status}[0];
+            }
+            else {
+                printf "\n\t\t%s", $msg->{$id}->{status}[0];
+            }
+            print color "$col->{to}" if $color; 
+            printf "\t\t\t\t\t\t\tTo:%-40s", @{ $msg->{$id}->{to} }[$i];
+>>>>>>> 8299b04c98481168691f69318aada59d72be9650
         }
         print "\n";
     }
@@ -686,12 +760,15 @@ sub parsepostfix {
 
         push @{ $msg->{$id}->{extinfo} }, $1 if $line =~ /host .* said: (.*)/;
 
+<<<<<<< HEAD
         if ( $line =~ /status=deferred/ ) {
             $msg->{$id}->{first_seen} = $time;
             $msg->{$id}->{deleted_time} = $time;
             printmailinfo( $msg->{$id} ); 
         }
 
+=======
+>>>>>>> 8299b04c98481168691f69318aada59d72be9650
 	    print "\tDebug: Got client/delay/relay/status info.\n" if $xdebug;
     }
 }
@@ -967,9 +1044,13 @@ for $i ( keys %$readytoprint ) {
 
 # Time to print footer info:
 printfooter();
+<<<<<<< HEAD
 
 
 die() if ! $PrintRestOfMessages;
+=======
+die("\n") if ! $debug;
+>>>>>>> 8299b04c98481168691f69318aada59d72be9650
 
 
 ###
