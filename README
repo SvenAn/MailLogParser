@@ -3,8 +3,4 @@
 MailLogParser - A small utility to parse Postfix, Mailscanner and Postgrey log files printing email info in a simple, human readable format.
 
 
-<<<<<<< HEAD
 MailLogParser is a small program designed to receive mail log input via STDIN or log files, process the info received, and print details about the mail parsed.  In its default state, MailLogParser only prints mail that has been fully processed and deleted by Postfix. Therefore e-mail still waiting in queue will not be printed.
-=======
-MailLogParser is a small program designed to receive mail log input via STDIN or log files, process the info received, and print details about the mail parced.  In its default state, MailLogParser only prints mail that has been fully processed and deleted by Postfix. Therefore e-mail still waiting in queue will not be printed.
->>>>>>> 8299b04c98481168691f69318aada59d72be9650
