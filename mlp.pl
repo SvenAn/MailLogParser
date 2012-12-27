@@ -15,6 +15,7 @@ use File::Spec;
 use POSIX qw(setsid);
 use IO::Select;
 use Term::ANSIColor;
+use Term::ReadKey;
 local $Term::ANSIColor::AUTORESET = 1;
 #use Compress::Zlib;
 
@@ -161,7 +162,7 @@ $SIG{'QUIT'} = 'shutdown_prog';
 
 
 ###
-# Parcing configfiles.
+# Parsing configfiles.
 sub parseconfig {
     foreach $line ( @config ) {
         chomp( $line );
@@ -385,66 +386,123 @@ sub check_date_change {
 }
 
 
-###
-# Printing the result in brief  and standard format.
-sub Printmailinfo_visual {
-    my $type = $_[0];
-
+sub addcolor{
     $col->{mystatus} = checkstatuscolor( $msg->{$id}->{status}[$#{$msg->{$id}->{status}}] ) if $#{$msg->{$id}->{status}} > -1;
 
-    # Time
-    print color "$col->{time}" if $color;
-    printf "%-12s", $msg->{$id}->{deleted_time};
+    #Time
+    $msg->{$id}->{deleted_time} = colored( $msg->{$id}->{deleted_time}, $col->{time} );
+    #From
+    $msg->{$id}->{from}         = colored( $msg->{$id}->{from}, $col->{from} );
+    #Server
+    $msg->{$id}->{server}       = colored( $msg->{$id}->{server}, $col->{time} );
+    #ID
+    $msg->{$id}->{id}           = colored( $msg->{$id}->{id}, $col->{id} );
 
-    # From
-    print color "$col->{from}" if $color; 
-    printf " From: %s", $msg->{$id}->{from};
-
-    if ( $type ne 'brief' ) {
-        # Mailserver
-        if ( $display_mailserver ) {
-            print color "$col->{time}" if $color;
-            printf "  %s ", $msg->{$id}->{server};
+    # Adding color to all recipients:
+    for $i ( 0..$#{ $msg->{$id}->{info} } ) {
+        #mystatus
+        $col->{mystatus} = checkstatuscolor( $msg->{$id}->{status}[$i] );
+        $msg->{$id}->{status}[$i] = colored( $msg->{$id}->{status}[$i], $col->{mystatus} );
+        # To
+        $msg->{$id}->{to}[$i]     = colored( $msg->{$id}->{to}[$i], $col->{to} );
+        # Delay
+        if ( $msg->{$id}->{delay}[$i] =~ /(\d+|\d+\.\d+)/) { $j = $1 }
+        else { $j = 0 };
+        if ( $delaywarn < $j ) {
+             $msg->{$id}->{delay}[$i] = colored($msg->{$id}->{delay}[$i], $col->{longdelay});
         }
-
-        # print ID
-        print color "$col->{id}" if $color;
-        printf " %-12s", $msg->{$id}->{id};
+        else {
+             $msg->{$id}->{delay}[$i] = colored($msg->{$id}->{delay}[$i], $col->{shortdelay});
+        }
+        # Info
+        $msg->{$id}->{info}[$i] = colored( $msg->{$id}->{info}[$i], $col->{info} ) if defined( $msg->{$id}->{info}[$i] );
     }
+}
 
-    print "\n";
 
-    # print info on each recipient.
+###
+# Formatting the info, obviesly!
+sub format_info {
+
+    # Lets set the sender/recipient size based on terminal width:
+    my ( $size, $neg_size );
+    my @term = GetTerminalSize;
+    my $terminalwidth = $term[0];
+    if ( $brief ) {
+        $size = ( $terminalwidth - 31 ) / 2 - 3;
+    }
+    else {
+        $size = ( $terminalwidth / 2 - 40 );
+    }
+    $neg_size -= ($size);
+    
+    # Formatting length of the variables for easy printing:
+    # Time
+    $msg->{$id}->{deleted_time} = sprintf( "%-12s", $msg->{$id}->{deleted_time} );
+    # From
+    if ( length( $msg->{$id}->{from} ) < $size ) { 
+        $msg->{$id}->{from} = sprintf( "From: %*s", $neg_size, $msg->{$id}->{from} );
+    }
+    else {
+        $msg->{$id}->{from} = sprintf( "From: %.*s..", $size-2, $msg->{$id}->{from} );
+    }
+    # Mailserver
+    #$msg->{$id}->{server}       = sprintf( "%s", $msg->{$id}->{server} );
+    # ID
+    $msg->{$id}->{id}           = sprintf( "%-12s", $msg->{$id}->{id} );
+
+    # Format info on each recipient.
     for $i ( 0..$#{ $msg->{$id}->{info} } ) {
 
-        if ( $color ) {
-            $col->{mystatus} = checkstatuscolor( $msg->{$id}->{status}[$i] );
-            print color "$col->{mystatus}";
+        #status
+        $msg->{$id}->{status}[$i] = sprintf( "%-8s", $msg->{$id}->{status}[$i] );
+        #To
+        if ( length( $msg->{$id}->{to}[$i] ) < $size ) { 
+            $msg->{$id}->{to}[$i] = sprintf( "To: %*s", $neg_size, $msg->{$id}->{to}[$i] );
         }
-        printf "\t%s", $msg->{$id}->{status}[$i];
-
-        print color "$col->{to}" if $color; 
-        printf "\tTo: %s", @{ $msg->{$id}->{to} }[$i];
-
-        if ( $type ne 'brief' ) {
-            if ( $msg->{$id}->{status}[$i] eq 'deferred' ) {
-                if ( $msg->{$id}->{delay}[$i] =~ /^\d+$/ ) {
-                    if ( $delaywarn < $msg->{$id}->{delay}[$i] && $color ) { print color "$col->{longdelay}" }
-                    elsif ( $color ) { print color "$col->{shortdelay}" }; 
-                    printf "\n\tDelay: %s", formattime( $msg->{$id}->{delay}[$i] );
-                }
+        else {
+            $msg->{$id}->{to}[$i] = sprintf( "To: %.*s..", $size-2, $msg->{$id}->{to}[$i] );
+        }
+        #Delay
+        #if ( $msg->{$id}->{delay}[$i] =~ /^\d+$/ ) {
+        $msg->{$id}->{delay}[$i] = sprintf( "Delay: %s", formattime( $msg->{$id}->{delay}[$i] ) );
+        #}
+        if ( $msg->{$id}->{status}[$i] eq 'deferred' ) {
                 $msg->{$id}->{info}[$i] = $msg->{$id}->{extinfo}[$i];
+        }
+        if ( defined( $msg->{$id}->{info}[$i] ) ) {
+            if ( $msg->{$id}->{info}[$i] =~ /(.*;) http:\/\// ) { $msg->{$id}->{info}[$i] = $1 };
+            if ( length( $msg->{$id}->{info}[$i] ) > $size ) { 
+                $msg->{$id}->{info}[$i] = sprintf( "Info:%.*s..", ($terminalwidth - $size -12) , $msg->{$id}->{info}[$i] );
             }
-            if ( defined( $msg->{$id}->{info}[$i] ) ) {
-                if ( $msg->{$id}->{info}[$i] =~ /(.*;) http:\/\// ) { $msg->{$id}->{info}[$i] = $1 };
-                print color "$col->{info}" if $color; 
-                printf "\n\tInfo:%s", $msg->{$id}->{info}[$i];
+            else {
+                $msg->{$id}->{info}[$i] = sprintf( "Info:%.*s", $terminalwidth - 82, $msg->{$id}->{info}[$i] );
             }
         }
-        print "\n";
     }
-    print "\n";
+
 }
+
+sub Printmailinfo_visual {
+    format_info();
+    addcolor() if $color;
+
+    if ( $brief ) {
+        for $i ( 0..$#{ $msg->{$id}->{info} } ) {
+            print "$msg->{$id}->{deleted_time} $msg->{$id}->{status}[$i] $msg->{$id}->{from} $msg->{$id}->{to}[$i]\n";
+        }
+    }
+    elsif ($verbose)  {
+
+    }
+    else {
+        print "$msg->{$id}->{deleted_time} $msg->{$id}->{from} $msg->{$id}->{server} $msg->{$id}->{id}\n";
+        for $i ( 0..$#{ $msg->{$id}->{info} } ) {
+            print "\t$msg->{$id}->{status}[$i]  $msg->{$id}->{to}[$i] $msg->{$id}->{info}[$i]\n";
+        }
+    }
+}
+
 
 
 sub Printmailinfo_visual_verbose {
@@ -905,7 +963,7 @@ sub printfooter {
 
         print color "$col->{headline}" if $color;
         print "_________________________________________________\n";
-        print "Done. $lines lines parsed in $endtime. $entries $entryname found.\n" if ! $debug;
+        print "Done. $lines lines parsed in $endtime. $entries $entryname found.\n\n" if ! $debug;
         print color 'reset' if $color;
     }
 }
@@ -969,7 +1027,7 @@ for $i ( keys %$readytoprint ) {
 printfooter();
 
 
-die() if ! $PrintRestOfMessages;
+exit if ! $PrintRestOfMessages;
 
 
 ###
