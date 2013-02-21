@@ -6,7 +6,7 @@
 # in a simple, human readable format.             #
 ###                                             ###
 
-my $version = 'v.005';
+my $version = 'v.006_1';
 
 
 use strict;
@@ -15,6 +15,7 @@ use File::Spec;
 use POSIX qw(setsid);
 use IO::Select;
 use Term::ANSIColor;
+use Term::ReadKey;
 local $Term::ANSIColor::AUTORESET = 1;
 #use Compress::Zlib;
 
@@ -40,6 +41,7 @@ mlp.pl [-vblncdxdah] <mail address>
         "tlsinfo"     = Prints tlsinfo.
         "h|help"      = Prints this help info and quits.
         "warnings"    = Prints warning messages as they apppear in the log file.
+        "deferred"    = Prints failed delivery of an e-mail.
 
 Example:
 	Searching for someone@ (all domains) in the seven past generations 
@@ -76,7 +78,8 @@ my $col = {
 
 
 my ( $verbose, $brief, $file, $help, $csv, $debug, $xdebug, $color, $stdin, $tlsinfo,
-    $date_change, $my_printed_date, $maillog_filename, $display_mailserver, $warnings );
+    $date_change, $my_printed_date, $maillog_filename, $display_mailserver, $warnings,
+    $PrintRestOfMessages, $display_deferred );
 
 
 &ReadConfigFile(); # We want to read default config before processing command line options;
@@ -101,7 +104,8 @@ my $options = GetOptions (
         "a|ansicolor" => \$color,
         "tlsinfo"     => \$tlsinfo,
         "h|help"      => \$help,
-        "warnings"    => \$warnings
+        "warnings"    => \$warnings,
+        "deferred"    => \$display_deferred
         
 );
 my $address = $ARGV[0] || 'all';
@@ -158,7 +162,7 @@ $SIG{'QUIT'} = 'shutdown_prog';
 
 
 ###
-# Parcing configfiles.
+# Parsing configfiles.
 sub parseconfig {
     foreach $line ( @config ) {
         chomp( $line );
@@ -184,18 +188,20 @@ sub parseconfig {
                 $line =~ /^tlstrust.*=.*'(.*)'/i   && do { $col->{tlstrust}   = $1; last SWITCH; }; 
 
                 # Default variables:
-                $line =~ /^display_mode.*=.*brief/i   && do { $brief = 1; last SWITCH; }; 
-                $line =~ /^display_mode.*=.*verbose/i   && do { $verbose = 1; undef( $brief ); last SWITCH; }; 
-                $line =~ /^logfile_name.*=\s*(\S+)/i   && do { $logfile = $1; last SWITCH; }; 
-                $line =~ /^NumFilesToParse.*=\s*(\d+)/i   && do { $NumberOfFiles = $1; last SWITCH; }; 
-                $line =~ /^debug.*=\s*(true|on)/i   && do {  $debug = $1; last SWITCH; }; 
-                $line =~ /^Xdebug.*=\s*(true|on)/i   && do {  $xdebug = $1; last SWITCH; }; 
-                $line =~ /^color.*=\s*(true|on)/i   && do {  $color = $1; last SWITCH; }; 
-                $line =~ /^Display_date_change.*=\s*(true|on)/i   && do {  $date_change = $1; last SWITCH; }; 
-                $line =~ /^Display_maillog_filename.*=\s*(true|on)/i   && do {  $maillog_filename = $1; last SWITCH; }; 
-                $line =~ /^Display_mailserver.*=\s*(true|on)/i   && do {  $display_mailserver = $1; last SWITCH; }; 
-                $line =~ /^Display_warnings.*=\s*(true|on)/i   && do {  $warnings = $1; last SWITCH; }; 
-                $line =~ /^default_logpath\s*=\s*(\S+)/i   && do { 
+                $line =~ /^display_mode.*=.*brief/i                 && do { $brief = 1;                     last SWITCH; }; 
+                $line =~ /^display_mode.*=.*verbose/i               && do { $verbose = 1; undef( $brief );  last SWITCH; }; 
+                $line =~ /^logfile_name.*=\s*(\S+)/i                && do { $logfile = $1;                  last SWITCH; }; 
+                $line =~ /^NumFilesToParse.*=\s*(\d+)/i             && do { $NumberOfFiles = $1;            last SWITCH; }; 
+                $line =~ /^debug.*=\s*(true|on)/i                   && do { $debug = $1;                    last SWITCH; }; 
+                $line =~ /^Xdebug.*=\s*(true|on)/i                  && do { $xdebug = $1;                   last SWITCH; }; 
+                $line =~ /^color.*=\s*(true|on)/i                   && do { $color = $1;                    last SWITCH; }; 
+                $line =~ /^Display_date_change.*=\s*(true|on)/i     && do { $date_change = $1;              last SWITCH; }; 
+                $line =~ /^Display_maillog_filename.*=\s*(true|on)/i   && do {  $maillog_filename = $1;     last SWITCH; }; 
+                $line =~ /^Display_mailserver.*=\s*(true|on)/i      && do { $display_mailserver = $1;       last SWITCH; }; 
+                $line =~ /^Display_warnings.*=\s*(true|on)/i        && do { $warnings = $1;                 last SWITCH; }; 
+                $line =~ /^PrintRestOfMessages\s*=\s*(true|on)/i    && do { $PrintRestOfMessages = $1;      last SWITCH; };
+                $line =~ /^Display_deferred_mail.*=\s*(true|on)/i   && do { $display_deferred = $1;         last SWITCH; }; 
+                $line =~ /^default_logpath\s*=\s*(\S+)/i            && do { 
                     $path = $1;
                     if ( $path !~ /\/$/ ) { $path .= "/"; }
                     last SWITCH;
@@ -307,13 +313,22 @@ sub checkpostgreytriple {
 }
 
 
+sub disableregexp() {
+    my $result = $_[0];
+    $result =~ s/(\?|\+|\{|\}|\*|\(|\))/\\$1/g;
+    $result =~ s/(\s)/_/g;
+    return $result;
+}
+
+
 sub uniquerecipient {
-        if ( defined ( $msg->{$id}->{to} ) ) {
-            for $i ( 0 .. $#{ $msg->{$id}->{to} } ) {
-                if ( ${ $msg->{$id}->{to} }[$i] =~ /$_[0]/i ) { return "nope" }
-            }
+    my $addr = &disableregexp( $_[0] );
+    if ( defined ( $msg->{$id}->{to} ) ) {
+        for $i ( 0 .. $#{ $msg->{$id}->{to} } ) {
+            if ( &disableregexp( ${ $msg->{$id}->{to} }[$i] ) =~ /$addr/i ) { return "nope" }
         }
-        return "yes";
+    }
+    return "yes";
 }
 
 
@@ -371,64 +386,123 @@ sub check_date_change {
 }
 
 
-###
-# Printing the result in brief  and standard format.
-sub Printmailinfo_visual {
-    my $type = $_[0];
-
+sub addcolor{
     $col->{mystatus} = checkstatuscolor( $msg->{$id}->{status}[$#{$msg->{$id}->{status}}] ) if $#{$msg->{$id}->{status}} > -1;
 
+    #Time
+    $msg->{$id}->{deleted_time} = colored( $msg->{$id}->{deleted_time}, $col->{time} );
+    #From
+    $msg->{$id}->{from}         = colored( $msg->{$id}->{from}, $col->{from} );
+    #Server
+    $msg->{$id}->{server}       = colored( $msg->{$id}->{server}, $col->{time} );
+    #ID
+    $msg->{$id}->{id}           = colored( $msg->{$id}->{id}, $col->{id} );
+
+    # Adding color to all recipients:
+    for $i ( 0..$#{ $msg->{$id}->{info} } ) {
+        #mystatus
+        $col->{mystatus} = checkstatuscolor( $msg->{$id}->{status}[$i] );
+        $msg->{$id}->{status}[$i] = colored( $msg->{$id}->{status}[$i], $col->{mystatus} );
+        # To
+        $msg->{$id}->{to}[$i]     = colored( $msg->{$id}->{to}[$i], $col->{to} );
+        # Delay
+        if ( $msg->{$id}->{delay}[$i] =~ /(\d+|\d+\.\d+)/) { $j = $1 }
+        else { $j = 0 };
+        if ( $delaywarn < $j ) {
+             $msg->{$id}->{delay}[$i] = colored($msg->{$id}->{delay}[$i], $col->{longdelay});
+        }
+        else {
+             $msg->{$id}->{delay}[$i] = colored($msg->{$id}->{delay}[$i], $col->{shortdelay});
+        }
+        # Info
+        $msg->{$id}->{info}[$i] = colored( $msg->{$id}->{info}[$i], $col->{info} ) if defined( $msg->{$id}->{info}[$i] );
+    }
+}
+
+
+###
+# Formatting the info, obviesly!
+sub format_info {
+
+    # Lets set the sender/recipient size based on terminal width:
+    my ( $size, $neg_size );
+    my @term = GetTerminalSize;
+    my $terminalwidth = $term[0];
+    if ( $brief ) {
+        $size = ( $terminalwidth - 31 ) / 2 - 3;
+    }
+    else {
+        $size = ( $terminalwidth / 2 - 40 );
+    }
+    $neg_size -= ($size);
+    
+    # Formatting length of the variables for easy printing:
     # Time
-    print color "$col->{time}" if $color;
-    printf "%-12s", $msg->{$id}->{deleted_time};
-
-    # Mailserver
-    if ( $display_mailserver ) {
-        print color "$col->{time}" if $color;
-        printf "  %s ", $msg->{$id}->{server};
-    }
-
-    # print ID unless type = brief.
-    if ( $type ne 'brief' ) {
-        print color "$col->{id}" if $color;
-        printf " %-12s", $msg->{$id}->{id};
-    }
-
-    # Status
-    if ( $color ) {
-        $col->{mystatus} = checkstatuscolor( $msg->{$id}->{status}[0] );
-        print color "$col->{mystatus}";
-    }
-    printf " %-8s", $msg->{$id}->{status}[0];
-
+    $msg->{$id}->{deleted_time} = sprintf( "%-12s", $msg->{$id}->{deleted_time} );
     # From
-    print color "$col->{from}" if $color; 
-    printf " From:%-40s", $msg->{$id}->{from};
+    if ( length( $msg->{$id}->{from} ) < $size ) { 
+        $msg->{$id}->{from} = sprintf( "From: %*s", $neg_size, $msg->{$id}->{from} );
+    }
+    else {
+        $msg->{$id}->{from} = sprintf( "From: %.*s..", $size-2, $msg->{$id}->{from} );
+    }
+    # Mailserver
+    #$msg->{$id}->{server}       = sprintf( "%s", $msg->{$id}->{server} );
+    # ID
+    $msg->{$id}->{id}           = sprintf( "%-12s", $msg->{$id}->{id} );
 
-    # To
-    print color "$col->{to}" if $color; 
-    printf "  To:%s", @{ $msg->{$id}->{to} }[0];
+    # Format info on each recipient.
+    for $i ( 0..$#{ $msg->{$id}->{info} } ) {
 
-    # if there are more than one recipient we want to print them on separate lines:
-    if ( $#{ $msg->{$id}->{to} } > 0 ) {
-        for $i ( 1..$#{ $msg->{$id}->{info} } ) {
-
-            if ( $color ) {
-                $col->{mystatus} = checkstatuscolor( $msg->{$id}->{status}[0] );
-                print color "$col->{mystatus}";
-            }
-            if ( $type ne 'brief' ) {
-                printf "\n\t\t\t     %s", $msg->{$id}->{status}[0];
+        #status
+        $msg->{$id}->{status}[$i] = sprintf( "%-8s", $msg->{$id}->{status}[$i] );
+        #To
+        if ( length( $msg->{$id}->{to}[$i] ) < $size ) { 
+            $msg->{$id}->{to}[$i] = sprintf( "To: %*s", $neg_size, $msg->{$id}->{to}[$i] );
+        }
+        else {
+            $msg->{$id}->{to}[$i] = sprintf( "To: %.*s..", $size-2, $msg->{$id}->{to}[$i] );
+        }
+        #Delay
+        #if ( $msg->{$id}->{delay}[$i] =~ /^\d+$/ ) {
+        $msg->{$id}->{delay}[$i] = sprintf( "Delay: %s", formattime( $msg->{$id}->{delay}[$i] ) );
+        #}
+        if ( $msg->{$id}->{status}[$i] eq 'deferred' ) {
+                $msg->{$id}->{info}[$i] = $msg->{$id}->{extinfo}[$i];
+        }
+        if ( defined( $msg->{$id}->{info}[$i] ) ) {
+            if ( $msg->{$id}->{info}[$i] =~ /(.*;) http:\/\// ) { $msg->{$id}->{info}[$i] = $1 };
+            if ( length( $msg->{$id}->{info}[$i] ) > $size ) { 
+                $msg->{$id}->{info}[$i] = sprintf( "Info:%.*s..", ($terminalwidth - $size -12) , $msg->{$id}->{info}[$i] );
             }
             else {
-                printf "\n\t\t%s", $msg->{$id}->{status}[0];
+                $msg->{$id}->{info}[$i] = sprintf( "Info:%.*s", $terminalwidth - 82, $msg->{$id}->{info}[$i] );
             }
-            print color "$col->{to}" if $color; 
-            printf "\t\t\t\t\t\t\tTo:%-40s", @{ $msg->{$id}->{to} }[$i];
         }
     }
-    print "\n";
 }
+
+
+sub Printmailinfo_visual {
+    format_info();
+    addcolor() if $color;
+
+    if ( $brief ) {
+        for $i ( 0..$#{ $msg->{$id}->{info} } ) {
+            print "$msg->{$id}->{deleted_time} $msg->{$id}->{status}[$i] $msg->{$id}->{from} $msg->{$id}->{to}[$i]\n";
+        }
+    }
+    elsif ($verbose)  {
+
+    }
+    else {
+        print "$msg->{$id}->{deleted_time} $msg->{$id}->{from} $msg->{$id}->{server} $msg->{$id}->{id}\n";
+        for $i ( 0..$#{ $msg->{$id}->{info} } ) {
+            print "\t$msg->{$id}->{status}[$i]  $msg->{$id}->{to}[$i] $msg->{$id}->{info}[$i]\n";
+        }
+    }
+}
+
 
 
 sub Printmailinfo_visual_verbose {
@@ -557,6 +631,7 @@ sub printmailinfo {
     if ( $address eq 'all' || $msg->{$id}->{from} =~ /$address/i || $j =~ /$address/i || $msg->{$id}->{id} =~ /$address/ ) { 
 
         unless ( defined( $msg->{$id}->{client}       ) ) { $msg->{$id}->{client}       =  '<!>'  }
+        unless ( defined( $msg->{$id}->{server}       ) ) { $msg->{$id}->{server}       =  '<!>'  }
         unless ( defined( $msg->{$id}->{first_seen}   ) ) { $msg->{$id}->{first_seen}   =  '<!>'  }
         unless ( defined( $msg->{$id}->{deleted_time} ) ) { $msg->{$id}->{deleted_time} =  '<!>'  }
         unless ( defined( $msg->{$id}->{size}   )       ) { $msg->{$id}->{size}         =  '<!>'  }
@@ -648,11 +723,20 @@ sub parsepostfix {
         #$readytoprint->{$id} = 1; 
     }
     elsif ( $cmd =~ /(virtual|smtp|error|local)/) {
-        push @{ $msg->{$id}->{to}     }, $1 if $line =~ /to=<([^>]+)>/ && uniquerecipient( $1 ) eq "yes";
+        if ( $line =~ /orig_to=<([^>]+)>/ ) {
+            push @{ $msg->{$id}->{to} }, $1 if uniquerecipient( $1 ) eq "yes";
+        }
+        elsif ( $line =~ /to=<([^>]+)>/ && uniquerecipient( $1 ) eq "yes" ) {
+            push @{ $msg->{$id}->{to} }, $1;
+        }
+
         push @{ $msg->{$id}->{delay}  }, $1 if $line =~ /delay=(\d+)/;
         push @{ $msg->{$id}->{delay}  }, $1 if $line =~ /delay=(\d+\.\d+)/;
         push @{ $msg->{$id}->{status} }, $1 if $line =~ /status=(\w+)/;
-        push @{ $msg->{$id}->{relay}  }, $1 if $line =~ /relay=(.*?), /;
+
+        if ( $line =~ /relay=(.*?), /i && $line !~ /status=deferred/ ) {
+            push @{ $msg->{$id}->{relay}  }, $1 if $line =~ /relay=(.*?), /;
+        }
 
         $msg->{$id}->{client} = $1 if $line =~ /client=.*\[(\d{1,3}.\d{1,3}\.\d{1,3}\.\d{1,3})\]/;
 
@@ -665,6 +749,12 @@ sub parsepostfix {
         push @{ $msg->{$id}->{info} }, $1 if $line =~ /status=.*(\(.*\)$)/;
 
         push @{ $msg->{$id}->{extinfo} }, $1 if $line =~ /host .* said: (.*)/;
+
+        if ( $line =~ /status=deferred/ ) {
+            $msg->{$id}->{first_seen} = $time;
+            $msg->{$id}->{deleted_time} = $time;
+            printmailinfo( $msg->{$id} ); 
+        }
 
 	    print "\tDebug: Got client/delay/relay/status info.\n" if $xdebug;
     }
@@ -879,7 +969,7 @@ sub printfooter {
 
         print color "$col->{headline}" if $color;
         print "_________________________________________________\n";
-        print "Done. $lines lines parsed in $endtime. $entries $entryname found.\n" if ! $debug;
+        print "Done. $lines lines parsed in $endtime. $entries $entryname found.\n\n" if ! $debug;
         print color 'reset' if $color;
     }
 }
@@ -941,7 +1031,9 @@ for $i ( keys %$readytoprint ) {
 
 # Time to print footer info:
 printfooter();
-die("\n") if ! $debug;
+
+
+exit if ! $PrintRestOfMessages;
 
 
 ###
@@ -954,8 +1046,8 @@ for $i ( keys %$msg ) {
         #$j .= "$msg->{$i}->{$_} ";
         $j .= "$_: $msg->{$i}->{$_}\n";
     }
-    if ( $address eq 'all' ||  $j =~ /$address/i ) {
+    #if ( $address eq 'all' ||  $j =~ /$address/i ) {
         print "$j\n";
-    }
+    #}
 }
 print "Done.\n";
