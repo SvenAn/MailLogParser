@@ -622,12 +622,14 @@ sub Printmailinfo_visual_verbose {
 # Printing the result in chosen format.
 sub printmailinfo {
     # Filling the holes of incomplete records...
-    unless ( defined( $msg->{$id}->{from} ) ) { $msg->{$id}->{from} =  '<!>'  }
-    unless ( defined( $msg->{$id}->{to} )   ) { $msg->{$id}->{to}   = ['<!>'] }
-    unless ( defined( $msg->{$id}->{id} )   ) { $msg->{$id}->{id}   =  '<!>'  }
+    unless ( defined( $msg->{$id}->{from} ) )    { $msg->{$id}->{from} =  '<!>'  }
+    unless ( defined( $msg->{$id}->{to} )   )    { $msg->{$id}->{to}   = ['<!>'] }
+    unless ( defined( $msg->{$id}->{orig_to} ) ) { $msg->{$id}->{to}   = ['<!>'] }
+    unless ( defined( $msg->{$id}->{id} )   )    { $msg->{$id}->{id}   =  '<!>'  }
 
     # Check if mail matches optional $address and return if not..
     $j = join( ", ", @{ $msg->{$id}->{to} } );
+    $j .= join( ", ", @{ $msg->{$id}->{orig_to} } );
     if ( $address eq 'all' || $msg->{$id}->{from} =~ /$address/i || $j =~ /$address/i || $msg->{$id}->{id} =~ /$address/ ) { 
 
         unless ( defined( $msg->{$id}->{client}       ) ) { $msg->{$id}->{client}       =  '<!>'  }
@@ -725,6 +727,7 @@ sub parsepostfix {
     elsif ( $cmd =~ /(virtual|smtp|error|local)/) {
         if ( $line =~ /orig_to=<([^>]+)>/ ) {
             push @{ $msg->{$id}->{to} }, $1 if uniquerecipient( $1 ) eq "yes";
+            push @{ $msg->{$id}->{orig_to} }, $1 if uniquerecipient( $1 ) eq "yes";
         }
         elsif ( $line =~ /to=<([^>]+)>/ && uniquerecipient( $1 ) eq "yes" ) {
             push @{ $msg->{$id}->{to} }, $1;
