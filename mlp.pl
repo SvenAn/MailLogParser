@@ -624,7 +624,7 @@ sub printmailinfo {
     # Filling the holes of incomplete records...
     unless ( defined( $msg->{$id}->{from} ) )    { $msg->{$id}->{from} =  '<!>'  }
     unless ( defined( $msg->{$id}->{to} )   )    { $msg->{$id}->{to}   = ['<!>'] }
-    unless ( defined( $msg->{$id}->{orig_to} ) ) { $msg->{$id}->{to}   = ['<!>'] }
+    unless ( defined( $msg->{$id}->{orig_to} ) ) { $msg->{$id}->{orig_to}   = ['<!>'] }
     unless ( defined( $msg->{$id}->{id} )   )    { $msg->{$id}->{id}   =  '<!>'  }
 
     # Check if mail matches optional $address and return if not..
