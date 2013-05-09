@@ -6,7 +6,7 @@
 # in a simple, human readable format.             #
 ###                                             ###
 
-my $version = 'v.006_1';
+my $version = 'v.007';
 
 
 use strict;
@@ -29,19 +29,22 @@ mlp.pl [-vblncdxdah] <mail address>
 
         "v|verbose"   = Prints extra info about the mail on multiple lines.
         "b|brief"     = Prints only some info about the mail.
-        "l|logfile:s" = Specify which logfile to read.
-        "n|num:i"     = How many generation of files to read. Mlp.pl will also
-			unzip .gz or .bz2 files. 
+        "l|logfile:s" = [path and filename] Specify which logfile to read.
+        "n|num"       = [integer] How many generation of files to read.
         "c|csv"       = Prints output in csv format. This option can be used
-			along with the -v or -b options.
+			            along with the -v or -b options.
         "d|debug"     = Prints debug info.
         "xd|xdebug"   = Will provide extensive debug info about all processed
-			lines.
-        "a|ansicolor" = Gives output in wonderful colors.
-        "tlsinfo"     = Prints tlsinfo.
+			            lines. (will output a LOT of debug info).
+        "a|ansicolor" = [on/off] Gives output in wonderful colors.
+        "colortheme"  = [light/dark/my/default] theme.
+        "tlsinfo"     = [on/off] Prints tlsinfo.
         "h|help"      = Prints this help info and quits.
-        "warnings"    = Prints warning messages as they apppear in the log file.
-        "deferred"    = Prints failed delivery of an e-mail.
+        "warnings"    = [on/off] Prints warning messages as they apppear in the log file.
+        "deferred"    = [on/off] Prints failed delivery of an e-mail.
+        "adjustwidth" = [on/off] Automaticly adjust output to fit Terminal width.
+        "datechange"  = [on/off] Prints change of date in logfile.
+        "servername"  = [on/off] Prints name of mailserver in output.
 
 Example:
 	Searching for someone@ (all domains) in the seven past generations 
@@ -56,6 +59,7 @@ EOF
 
 
 # Default colors
+my $coltheme = "not_decided"; # will be set either in command line or in  config file.
 my $col = {
     headline      => 'YELLOW',
     time          => 'WHITE',
@@ -79,10 +83,19 @@ my $col = {
 
 my ( $verbose, $brief, $file, $help, $csv, $debug, $xdebug, $color, $stdin, $tlsinfo,
     $date_change, $my_printed_date, $maillog_filename, $display_mailserver, $warnings,
-    $PrintRestOfMessages, $display_deferred );
+    $PrintRestOfMessages, $display_deferred, $adjustwidth );
 
+sub dbug {
+    my $txt = $_[0];
+    print color "BRIGHT_BLACK" if $color;
+    print "Debug: $txt\n";
+}
 
-&ReadConfigFile(); # We want to read default config before processing command line options;
+&ReadConfigFile("all"); # We want to read default config before processing command line options;
+
+#Now we need to save the original color theme to check whether we need to reload colors after
+#the command line options are parsed:
+my $i = $coltheme;
 
 
 #We want to make sure Bold is not set unless explicitly specified.
@@ -94,26 +107,37 @@ while ( my ($key, $value) = each(%$col) ) {
 use Getopt::Long;
 my $NumberOfFiles;
 my $options = GetOptions ( 
-        "v|verbose"   => \$verbose,
-        "b|brief"     => \$brief,
-        "l|logfile:s" => \$file,
-        "n|num:i"     => \$NumberOfFiles,
-        "c|csv"       => \$csv,
-        "d|debug"     => \$debug,
-        "xd|xdebug"   => \$xdebug,
-        "a|ansicolor" => \$color,
-        "tlsinfo"     => \$tlsinfo,
-        "h|help"      => \$help,
-        "warnings"    => \$warnings,
-        "deferred"    => \$display_deferred
+        "v|verbose"     => \$verbose,
+        "b|brief"       => \$brief,
+        "l|logfile:s"   => \$file,
+        "n|num:i"       => \$NumberOfFiles,
+        "c|csv"         => \$csv,
+        "d|debug"       => \$debug,
+        "xd|xdebug"     => \$xdebug,
+        "a|ansicolor:s" => \$color,
+        "colortheme:s"  => \$coltheme,
+        "tlsinfo:s"     => \$tlsinfo,
+        "h|help"        => \$help,
+        "warnings:s"    => \$warnings,
+        "deferred:s"    => \$display_deferred,
+        "datechange:s"  => \$date_change,
+        "servername:s"  => \$display_mailserver,
+        "adjustwidth:s" => \$adjustwidth
         
 );
 my $address = $ARGV[0] || 'all';
+die "$helptext" if $help;
+
+
+# Reread config file if colortheme has changed and color is enabled:
+dbug("Color Theme=$coltheme") if $debug;
+dbug("Color=$color") if $debug;
+undef( $color ) if $color !~ /true|on/i;
+&ReadConfigFile("colors") if $color;
+
 
 my ($volume,$path,$logfile);
 ($volume,$path,$logfile) = File::Spec->splitpath( $file ) if defined($file);
-
-die "$helptext" if $help;
 
 
 # Making sure all values have been handled properly: 
@@ -126,7 +150,7 @@ eval {
     require Compress::Bzip2;
     Compress::Bzip2->import();
 };
-unless($@) { $bz2_loaded = 1; print "Debug: Compress::Bzip2 loaded.\n" if $debug; }
+unless($@) { $bz2_loaded = 1; &dbug('Compress::Bzip2 loaded.') if $debug; }
 
 
 #Loading Compress::Zlib if module is present.
@@ -135,11 +159,11 @@ eval {
     require Compress::Zlib;
     Compress::Zlib->import();
 };
-unless($@) { $gz_loaded = 1; print "Debug: Compress::Zlib loaded.\n" if $debug; }
+unless($@) { $gz_loaded = 1; &dbug("Compress::Zlib loaded.") if $debug; }
 
 
 # All sorts of variables
-my ( $i, $j, $msg, $date, $time, $server, $cmd, $id, $line, $Mailscanner, $starttime, $readytoprint,
+my ( $j, $msg, $date, $time, $server, $cmd, $id, $line, $Mailscanner, $starttime, $readytoprint,
     $endtime, $postgreylist, $Postgrey, $tls, $to );
 my $lines = 0;
 my $entries = 0;
@@ -160,62 +184,11 @@ $SIG{'TERM'} = 'shutdown_prog';
 $SIG{'QUIT'} = 'shutdown_prog';
 
 
-
-###
-# Parsing configfiles.
-sub parseconfig {
-    foreach $line ( @config ) {
-        chomp( $line );
-        unless ( $line =~ /(^#|^$)/ ) {
-            #print "Reading config line: $line.\n";
-            SWITCH: {
-                # Colors:
-                $line =~ /^headline.*=.*'(.*)'/i   && do { $col->{headline}   = $1; last SWITCH; }; 
-                $line =~ /^time.*=.*'(.*)'/i       && do { $col->{time}       = $1; last SWITCH; }; 
-                $line =~ /^from.*=.*'(.*)'/i       && do { $col->{from}       = $1; last SWITCH; }; 
-                $line =~ /^to.*=.*'(.*)'/i         && do { $col->{to}         = $1; last SWITCH; }; 
-                $line =~ /^id.*=.*'(.*)'/i         && do { $col->{id}         = $1; last SWITCH; }; 
-                $line =~ /^size.*=.*'(.*)'/i       && do { $col->{size}       = $1; last SWITCH; }; 
-                $line =~ /^info.*=.*'(.*)'/i       && do { $col->{info}       = $1; last SWITCH; }; 
-                $line =~ /^shortdelay.*=.*'(.*)'/i && do { $col->{shortdelay} = $1; last SWITCH; }; 
-                $line =~ /^longdelay.*=.*'(.*)'/i  && do { $col->{longdelay}  = $1; last SWITCH; }; 
-                $line =~ /^bounced.*=.*'(.*)'/i    && do { $col->{bounced}    = $1; last SWITCH; }; 
-                $line =~ /^reject.*=.*'(.*)'/i     && do { $col->{reject}     = $1; last SWITCH; }; 
-                $line =~ /^sent.*=.*'(.*)'/i       && do { $col->{sent}       = $1; last SWITCH; }; 
-                $line =~ /^spam.*=.*'(.*)'/i       && do { $col->{spam}       = $1; last SWITCH; }; 
-                $line =~ /^quarantine.*=.*'(.*)'/i && do { $col->{quarantine} = $1; last SWITCH; }; 
-                $line =~ /^tls.*=.*'(.*)'/i        && do { $col->{tls}        = $1; last SWITCH; }; 
-                $line =~ /^tlstrust.*=.*'(.*)'/i   && do { $col->{tlstrust}   = $1; last SWITCH; }; 
-
-                # Default variables:
-                $line =~ /^display_mode.*=.*brief/i                 && do { $brief = 1;                     last SWITCH; }; 
-                $line =~ /^display_mode.*=.*verbose/i               && do { $verbose = 1; undef( $brief );  last SWITCH; }; 
-                $line =~ /^logfile_name.*=\s*(\S+)/i                && do { $logfile = $1;                  last SWITCH; }; 
-                $line =~ /^NumFilesToParse.*=\s*(\d+)/i             && do { $NumberOfFiles = $1;            last SWITCH; }; 
-                $line =~ /^debug.*=\s*(true|on)/i                   && do { $debug = $1;                    last SWITCH; }; 
-                $line =~ /^Xdebug.*=\s*(true|on)/i                  && do { $xdebug = $1;                   last SWITCH; }; 
-                $line =~ /^color.*=\s*(true|on)/i                   && do { $color = $1;                    last SWITCH; }; 
-                $line =~ /^Display_date_change.*=\s*(true|on)/i     && do { $date_change = $1;              last SWITCH; }; 
-                $line =~ /^Display_maillog_filename.*=\s*(true|on)/i   && do {  $maillog_filename = $1;     last SWITCH; }; 
-                $line =~ /^Display_mailserver.*=\s*(true|on)/i      && do { $display_mailserver = $1;       last SWITCH; }; 
-                $line =~ /^Display_warnings.*=\s*(true|on)/i        && do { $warnings = $1;                 last SWITCH; }; 
-                $line =~ /^PrintRestOfMessages\s*=\s*(true|on)/i    && do { $PrintRestOfMessages = $1;      last SWITCH; };
-                $line =~ /^Display_deferred_mail.*=\s*(true|on)/i   && do { $display_deferred = $1;         last SWITCH; }; 
-                $line =~ /^default_logpath\s*=\s*(\S+)/i            && do { 
-                    $path = $1;
-                    if ( $path !~ /\/$/ ) { $path .= "/"; }
-                    last SWITCH;
-                }; 
-            } 
-        }
-    }
-}
-
-
 ###
 # Reading config in /etc/mlp.conf, /etc/mlp/mlp.conf, /usr/local/etc or ~/.mlprc
 sub ReadConfigFile() {
     my $file;
+    my $read = $_[0];
 
     if ( -e "$ENV{HOME}/.mlprc" )          { $file = "$ENV{HOME}/.mlprc";       }
     elsif ( -e "/etc/mlp.conf" )           { $file = "/etc/mlp.conf";           }
@@ -226,7 +199,60 @@ sub ReadConfigFile() {
         open( CONF, $file ) || print "ERROR: Could not open $file!";
         @config = <CONF>;
         close( CONF );
-        parseconfig();
+        foreach $line ( @config ) {
+            chomp( $line );
+            SWITCH: {
+                last if ( $line =~ /(^#|^$)/ );
+
+                # Color theme:
+                if ( $coltheme eq "not_decided" ) {
+                    $line =~ /^Color_Theme.*=.*dark/i    && do { $coltheme = "dark";    last SWITCH; };
+                    $line =~ /^Color_Theme.*=.*light/i   && do { $coltheme = "light";   last SWITCH; };
+                    $line =~ /^Color_Theme.*=.*my/i      && do { $coltheme = "my";      last SWITCH; };
+                    $line =~ /^Color_Theme.*=.*default/i && do { $coltheme = "default"; last SWITCH; };
+                }
+                # Colors:
+                $line =~ /^$coltheme\_headline.*=.*'(.*)'/i   && do { $col->{headline}   = $1; last SWITCH; };
+                $line =~ /^$coltheme\_time.*=.*'(.*)'/i       && do { $col->{time}       = $1; last SWITCH; };
+                $line =~ /^$coltheme\_from.*=.*'(.*)'/i       && do { $col->{from}       = $1; last SWITCH; };
+                $line =~ /^$coltheme\_to.*=.*'(.*)'/i         && do { $col->{to}         = $1; last SWITCH; };
+                $line =~ /^$coltheme\_id.*=.*'(.*)'/i         && do { $col->{id}         = $1; last SWITCH; };
+                $line =~ /^$coltheme\_size.*=.*'(.*)'/i       && do { $col->{size}       = $1; last SWITCH; };
+                $line =~ /^$coltheme\_info.*=.*'(.*)'/i       && do { $col->{info}       = $1; last SWITCH; };
+                $line =~ /^$coltheme\_shortdelay.*=.*'(.*)'/i && do { $col->{shortdelay} = $1; last SWITCH; };
+                $line =~ /^$coltheme\_longdelay.*=.*'(.*)'/i  && do { $col->{longdelay}  = $1; last SWITCH; };
+                $line =~ /^$coltheme\_bounced.*=.*'(.*)'/i    && do { $col->{bounced}    = $1; last SWITCH; };
+                $line =~ /^$coltheme\_reject.*=.*'(.*)'/i     && do { $col->{reject}     = $1; last SWITCH; };
+                $line =~ /^$coltheme\_sent.*=.*'(.*)'/i       && do { $col->{sent}       = $1; last SWITCH; };
+                $line =~ /^$coltheme\_spam.*=.*'(.*)'/i       && do { $col->{spam}       = $1; last SWITCH; };
+                $line =~ /^$coltheme\_quarantine.*=.*'(.*)'/i && do { $col->{quarantine} = $1; last SWITCH; };
+                $line =~ /^$coltheme\_tls.*=.*'(.*)'/i        && do { $col->{tls}        = $1; last SWITCH; };
+                $line =~ /^$coltheme\_tlstrust.*=.*'(.*)'/i   && do { $col->{tlstrust}   = $1; last SWITCH; };
+
+                # Default variables:
+                if ( $read eq "all" ) {
+                    $line =~ /^display_mode.*=.*brief/i                 && do { $brief = 1;                     last SWITCH; };
+                    $line =~ /^display_mode.*=.*verbose/i               && do { $verbose = 1; undef( $brief );  last SWITCH; };
+                    $line =~ /^logfile_name.*=\s*(\S+)/i                && do { $logfile = $1;                  last SWITCH; };
+                    $line =~ /^NumFilesToParse.*=\s*(\d+)/i             && do { $NumberOfFiles = $1;            last SWITCH; };
+                    $line =~ /^debug.*=\s*(true|on)/i                   && do { $debug = $1;                    last SWITCH; };
+                    $line =~ /^Xdebug.*=\s*(true|on)/i                  && do { $xdebug = $1;                   last SWITCH; };
+                    $line =~ /^color.*=\s*(true|on)/i                   && do { $color = $1;                    last SWITCH; };
+                    $line =~ /^Display_date_change.*=\s*(true|on)/i     && do { $date_change = $1;              last SWITCH; };
+                    $line =~ /^Display_maillog_filename.*=\s*(true|on)/i   && do {  $maillog_filename = $1;     last SWITCH; };
+                    $line =~ /^Display_mailserver.*=\s*(true|on)/i      && do { $display_mailserver = $1;       last SWITCH; };
+                    $line =~ /^Display_warnings.*=\s*(true|on)/i        && do { $warnings = $1;                 last SWITCH; };
+                    $line =~ /^PrintRestOfMessages\s*=\s*(true|on)/i    && do { $PrintRestOfMessages = $1;      last SWITCH; };
+                    $line =~ /^Display_deferred_mail.*=\s*(true|on)/i   && do { $display_deferred = $1;         last SWITCH; };
+                    $line =~ /^Adjust_terminal_width.*=\s*(true|on)/i   && do { $adjustwidth = $1;              last SWITCH; };
+                    $line =~ /^default_logpath\s*=\s*(\S+)/i            && do {
+                        $path = $1;
+                        if ( $path !~ /\/$/ ) { $path .= "/"; }
+                        last SWITCH;
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -397,6 +423,10 @@ sub addcolor{
     $msg->{$id}->{server}       = colored( $msg->{$id}->{server}, $col->{time} );
     #ID
     $msg->{$id}->{id}           = colored( $msg->{$id}->{id}, $col->{id} );
+    #Client
+    $msg->{$id}->{client}       = colored( $msg->{$id}->{client}, $col->{id} );
+    #Size
+    $msg->{$id}->{size}         = colored( $msg->{$id}->{size}, $col->{size} );
 
     # Adding color to all recipients:
     for $i ( 0..$#{ $msg->{$id}->{info} } ) {
@@ -414,6 +444,8 @@ sub addcolor{
         else {
              $msg->{$id}->{delay}[$i] = colored($msg->{$id}->{delay}[$i], $col->{shortdelay});
         }
+        # Relay
+        $msg->{$id}->{relay}[$i] = colored( $msg->{$id}->{relay}[$i], $col->{id} );
         # Info
         $msg->{$id}->{info}[$i] = colored( $msg->{$id}->{info}[$i], $col->{info} ) if defined( $msg->{$id}->{info}[$i] );
     }
@@ -424,21 +456,30 @@ sub addcolor{
 # Formatting the info, obviesly!
 sub format_info {
 
-    # Lets set the sender/recipient size based on terminal width:
-    my ( $size, $neg_size );
-    my @term = GetTerminalSize;
-    my $terminalwidth = $term[0];
-    if ( $brief ) {
-        $size = ( $terminalwidth - 31 ) / 2 - 3;
+    my ( $size, $neg_size, $terminalwidth );
+
+    if ( $adjustwidth =~ /true|on/i ) {
+        # Lets set the sender/recipient size based on terminal width:
+        my @term = GetTerminalSize;
+        $terminalwidth = $term[0];
+        if ( $brief ) {
+            $size = ( $terminalwidth - 31 ) / 2 - 3;
+        }
+        else {
+            $size = ( $terminalwidth / 2 - 40 );
+        }
     }
     else {
-        $size = ( $terminalwidth / 2 - 40 );
+        $size = 40;
+        $terminalwidth = 130;
     }
     $neg_size -= ($size);
-    
+ 
     # Formatting length of the variables for easy printing:
+
     # Time
     $msg->{$id}->{deleted_time} = sprintf( "%-12s", $msg->{$id}->{deleted_time} );
+
     # From
     if ( length( $msg->{$id}->{from} ) < $size ) { 
         $msg->{$id}->{from} = sprintf( "From: %*s", $neg_size, $msg->{$id}->{from} );
@@ -446,16 +487,31 @@ sub format_info {
     else {
         $msg->{$id}->{from} = sprintf( "From: %.*s..", $size-2, $msg->{$id}->{from} );
     }
+
     # Mailserver
     #$msg->{$id}->{server}       = sprintf( "%s", $msg->{$id}->{server} );
+
     # ID
-    $msg->{$id}->{id}           = sprintf( "%-12s", $msg->{$id}->{id} );
+    #$msg->{$id}->{id}           = sprintf( "%-12s", $msg->{$id}->{id} );
+    if ( "$id" eq "$msg->{$id}->{id}" ) {
+        $msg->{$id}->{id} = sprintf( "%-12s", $msg->{$id}->{id} );
+    }
+    else {
+        $msg->{$id}->{id} = sprintf( "%s %s", $msg->{$id}->{id}, $id );
+    }
+
+    #Client
+    $msg->{$id}->{client} = sprintf( "client=%s", $msg->{$id}->{client} );
+
+    #Size
+    $msg->{$id}->{size} = sprintf( "size=%s", $msg->{$id}->{size} );
 
     # Format info on each recipient.
     for $i ( 0..$#{ $msg->{$id}->{info} } ) {
 
         #status
         $msg->{$id}->{status}[$i] = sprintf( "%-8s", $msg->{$id}->{status}[$i] );
+
         #To
         if ( length( $msg->{$id}->{to}[$i] ) < $size ) { 
             $msg->{$id}->{to}[$i] = sprintf( "To: %*s", $neg_size, $msg->{$id}->{to}[$i] );
@@ -463,10 +519,13 @@ sub format_info {
         else {
             $msg->{$id}->{to}[$i] = sprintf( "To: %.*s..", $size-2, $msg->{$id}->{to}[$i] );
         }
+
         #Delay
         #if ( $msg->{$id}->{delay}[$i] =~ /^\d+$/ ) {
         $msg->{$id}->{delay}[$i] = sprintf( "Delay: %s", formattime( $msg->{$id}->{delay}[$i] ) );
         #}
+
+        # Info
         if ( $msg->{$id}->{status}[$i] eq 'deferred' ) {
                 $msg->{$id}->{info}[$i] = $msg->{$id}->{extinfo}[$i];
         }
@@ -477,6 +536,22 @@ sub format_info {
             }
             else {
                 $msg->{$id}->{info}[$i] = sprintf( "Info:%.*s", $terminalwidth - 82, $msg->{$id}->{info}[$i] );
+            }
+        }
+
+        # Relay
+        if ( defined( $msg->{$id}->{relay}[$i] ) ) {
+            if ( $msg->{$id}->{relay}[$i] !~ /(thrashcan|Never received|<!>)/ ) {
+                if ( length( $msg->{$id}->{relay}[$i] ) > ( $terminalwidth - ( $terminalwidth - $size ) - 14 ) ) { 
+                    $msg->{$id}->{relay}[$i] = sprintf( "relayed to: %.*s..", ($terminalwidth - ( $terminalwidth - $size ) - 2 ),
+                        $msg->{$id}->{relay}[$i] );
+                }
+                else {
+                    $msg->{$id}->{relay}[$i] = sprintf( "relayed to: %s", $msg->{$id}->{relay}[$i] );
+                }
+            }
+            else {
+                $msg->{$id}->{relay}[$i] = "";
             }
         }
     }
@@ -492,13 +567,26 @@ sub Printmailinfo_visual {
             print "$msg->{$id}->{deleted_time} $msg->{$id}->{status}[$i] $msg->{$id}->{from} $msg->{$id}->{to}[$i]\n";
         }
     }
-    elsif ($verbose)  {
+    elsif ( $verbose )  {
+        print "$msg->{$id}->{deleted_time} $msg->{$id}->{server} $msg->{$id}->{id} $msg->{$id}->{client} $msg->{$id}->{size}\n";
+        print "   $msg->{$id}->{from}\n";
+        for $i ( 0..$#{ $msg->{$id}->{status} } ) {
+            print "\t$msg->{$id}->{status}[$i] $msg->{$id}->{to}[$i]\n";
+            print "\t$msg->{$id}->{delay}[$i], $msg->{$id}->{relay}[$i]\n";
+            print "\t$msg->{$id}->{info}[$i]\n";
+        }
+        print "\n";
 
     }
     else {
-        print "$msg->{$id}->{deleted_time} $msg->{$id}->{from} $msg->{$id}->{server} $msg->{$id}->{id}\n";
-        for $i ( 0..$#{ $msg->{$id}->{info} } ) {
-            print "\t$msg->{$id}->{status}[$i]  $msg->{$id}->{to}[$i] $msg->{$id}->{info}[$i]\n";
+        if ( $display_mailserver =~ /true|on/i ) {
+            print "$msg->{$id}->{deleted_time} $msg->{$id}->{from} $msg->{$id}->{server} $msg->{$id}->{id}\n";
+        }
+        else {
+            print "$msg->{$id}->{deleted_time} $msg->{$id}->{from} $msg->{$id}->{id}\n";
+        }
+        for $i ( 0..$#{ $msg->{$id}->{status} } ) {
+            print "\t$msg->{$id}->{status}[$i]  $msg->{$id}->{to}[$i] $msg->{$id}->{relay}[$i]\n";
         }
     }
 }
@@ -513,7 +601,7 @@ sub Printmailinfo_visual_verbose {
     printf "%-12s", $msg->{$id}->{deleted_time};
 
     # Mailserver
-    if ( $display_mailserver ) {
+    if ( $display_mailserver =~ /true|on/i ) {
         print color "$col->{time}" if $color;
         printf "  %s ", $msg->{$id}->{server};
     }
@@ -658,7 +746,7 @@ sub printmailinfo {
             Printmailinfo_visual('brief');
         }
         elsif ( $verbose ) {
-            Printmailinfo_visual_verbose();
+            Printmailinfo_visual('verbose');
         }
         else {
             Printmailinfo_visual('standard');
@@ -670,7 +758,7 @@ sub printmailinfo {
     unless ( checkpostgreytriple() eq "not ok" ) { 
         if ( defined( $postgreylist->{$_[0]} ) ) { delete $postgreylist->{$_[0]} };
     }
-    print "\tDeleting $id\n" if $debug;
+    dbug("Deleting $id") if $debug;
     delete $msg->{ $msg->{$id}->{id1} } if defined $msg->{$id}->{id1};
     delete $msg->{$id};
 }
@@ -815,7 +903,7 @@ sub parsemailscanner {
         $msg->{$2} = $msg->{$1};
         $msg->{$2}->{id1} = $1;
         delete $msg->{$1};
-	    print "\tDebug: Got requeue info. $1($id) -> $2\n" if $debug;
+	    dbug("Got requeue info. $1($id) -> $2") if $debug;
     }
     elsif ( $line =~ /with subject (.*)/ ) {
          $msg->{$id}->{subject} = $1;
@@ -866,7 +954,7 @@ sub ParseLine {
     if ( $_[0] =~ /^(\w\w\w\s{1,2}\d{1,2}) (\d\d:\d\d:\d\d) (.*) postfix\/(\w+)\[\d+\]: ([0-9A-Z]+): (.*)/ ) {
         ( $date, $time, $server, $cmd, $id, $line ) = ( $1, $2, $3, $4, $5, $6 );
         print "\tDebug: Parsing (Postfix): <$_>\n" if $xdebug;
-        check_date_change() if $date_change;
+        check_date_change() if $date_change =~ /on|true/i;
         parsepostfix( $_ );
     }
 
@@ -951,7 +1039,7 @@ sub readgzfile {
     my $gz = gzopen($_[0], "r") or die "Cannot open $_[0]: $errno\n" ;
 
     while ($gz->gzreadline( $line ) > 0) {
-        print "$line" if $debug;
+        dbug("$line") if $debug;
         ParseLine( $line );
     }
     $gz->gzclose() ;
@@ -994,7 +1082,7 @@ $stdin = IO::Select->new();
 $stdin->add(\*STDIN);
 
 if ($stdin->can_read(.5)) {
-    print "Reading from <stdin>.\n" if ( $debug || $maillog_filename );
+    dbug("Reading from <stdin>.") if $debug;
     while ( <STDIN> ) {
         &ParseLine( $_ );
         undef( $logfile );
