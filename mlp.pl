@@ -319,7 +319,7 @@ sub checkstatuscolor {
         return $col->{bounced} if $_[0] =~ /bounced/;
         return $col->{sent}    if $_[0] =~ /sent/;
         return $col->{spam}    if $_[0] =~ /is spam/;
-        return $col->{notspam} if $_[0] =~ /is not spam/;
+        return $col->{notspam} if $_[0] =~ /clean/;
         return $col->{reject}  if $_[0] =~ /reject/;
     }
     return 'MAGENTA';
@@ -427,6 +427,14 @@ sub addcolor{
     $msg->{$id}->{client}       = colored( $msg->{$id}->{client}, $col->{id} );
     #Size
     $msg->{$id}->{size}         = colored( $msg->{$id}->{size}, $col->{size} );
+    #Mailscanner
+    if ( defined( $msg->{$id}->{mailscanner} ) && defined( $msg->{$id}->{scanned} ) ) {
+        $i = colored( "Spam status=",  $col->{info} );
+        $j = colored( $msg->{$id}->{spam_status}, checkstatuscolor( $msg->{$id}->{spam_status} ) );
+        $msg->{$id}->{spam_status}          = "$i$j";
+        $msg->{$id}->{spam_score}           = colored( $msg->{$id}->{spam_score}, $col->{info} );
+        $msg->{$id}->{spam_score_required}  = colored( $msg->{$id}->{spam_score_required}, $col->{info} );
+    }
 
     # Adding color to all recipients:
     for $i ( 0..$#{ $msg->{$id}->{info} } ) {
@@ -506,6 +514,14 @@ sub format_info {
     #Size
     $msg->{$id}->{size} = sprintf( "size=%s", $msg->{$id}->{size} );
 
+    #Mailscanner
+    if ( defined( $msg->{$id}->{mailscanner} ) && defined( $msg->{$id}->{scanned} ) ) {
+        $msg->{$id}->{spam_status} =~ s/is not spam/clean/;
+        $msg->{$id}->{spam_score} = sprintf( "score=%s", $msg->{$id}->{spam_score} );
+        $msg->{$id}->{spam_score_required} = sprintf( "required=%s", $msg->{$id}->{spam_score_required});
+    }
+
+
     # Format info on each recipient.
     for $i ( 0..$#{ $msg->{$id}->{info} } ) {
 
@@ -569,6 +585,17 @@ sub Printmailinfo_visual {
     }
     elsif ( $verbose )  {
         print "$msg->{$id}->{deleted_time} $msg->{$id}->{server} $msg->{$id}->{id} $msg->{$id}->{client} $msg->{$id}->{size}\n";
+        if ( defined( $msg->{$id}->{mailscanner} ) && defined( $msg->{$id}->{scanned} ) ) {
+            print "   $msg->{$id}->{spam_status} $msg->{$id}->{spam_score} $msg->{$id}->{spam_score_required}\n";
+            #print color "$col->{info}" if $color;
+            #printf "\tchecks:%.120s\n", $msg->{$id}->{spam_score_detail};
+
+        }
+        elsif ( defined( $msg->{$id}->{mailscanner} ) && ! defined( $msg->{$id}->{scanned} ) ) {
+            print color "$col->{info}" if $color;
+            print "\tInfo: Mail is passed to mailscanner, but not checked.\n";
+        }
+
         print "   $msg->{$id}->{from}\n";
         for $i ( 0..$#{ $msg->{$id}->{status} } ) {
             print "\t$msg->{$id}->{status}[$i] $msg->{$id}->{to}[$i]\n";
