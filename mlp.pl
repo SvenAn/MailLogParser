@@ -6,7 +6,7 @@
 # in a simple, human readable format.             #
 ###                                             ###
 
-my $version = 'v.007';
+my $version = 'v.008';
 
 
 use strict;
@@ -83,13 +83,18 @@ my $col = {
 
 my ( $verbose, $brief, $file, $help, $csv, $debug, $xdebug, $color, $stdin, $tlsinfo,
     $date_change, $my_printed_date, $maillog_filename, $display_mailserver, $warnings,
-    $PrintRestOfMessages, $display_deferred, $adjustwidth, $NumberOfFiles );
+    $PrintRestOfMessages, $display_deferred, $adjustwidth, $NumberOfFiles, $csv_string,
+    $csv_type, $csv_format );
+
 
 sub dbug {
-    my $txt = $_[0];
-    print color "BRIGHT_BLACK" if $color;
-    print "Debug: $txt\n";
+    if ( $debug ) {
+        my $txt = $_[0];
+        print color "BRIGHT_BLACK" if $color;
+        print "Debug: $txt\n";
+    }
 }
+
 
 &ReadConfigFile("all"); # We want to read default config before processing command line options;
 
@@ -111,6 +116,7 @@ my $options = GetOptions (
         "l|logfile:s"   => \$file,
         "n|num:i"       => \$NumberOfFiles,
         "c|csv"         => \$csv,
+        "csvtype:s"     => \$csv_type,
         "d|debug"       => \$debug,
         "xd|xdebug"     => \$xdebug,
         "a|ansicolor:s" => \$color,
@@ -128,9 +134,26 @@ my $address = $ARGV[0] || 'all';
 die "$helptext" if $help;
 
 
+if ( $csv ) {
+    $csv_type = "none" if ! defined( $csv_type );
+    $warnings = "no";
+    $date_change = "no";
+
+    if ( defined( $csv_string->{$csv_type} ) ) {
+        $csv_format = $csv_string->{$csv_type};
+    }
+    else {
+        $csv_format = "<id>,<deleted_time>,<from>,<to>,<server>,<status>,<relay>";
+    }
+
+    print "$csv_format\n";
+    &dbug("csvformat = $csv_format");
+}
+
+
 # Reread config file if colortheme has changed and color is enabled:
-dbug("Color Theme=$coltheme") if $debug;
-dbug("Color=$color") if $debug;
+dbug("Color Theme=$coltheme");
+dbug("Color=$color");
 undef( $color ) if $color !~ /true|on/i;
 &ReadConfigFile("colors") if $color;
 
@@ -149,7 +172,7 @@ eval {
     require Compress::Bzip2;
     Compress::Bzip2->import();
 };
-unless($@) { $bz2_loaded = 1; &dbug('Compress::Bzip2 loaded.') if $debug; }
+unless($@) { $bz2_loaded = 1; &dbug('Compress::Bzip2 loaded.'); }
 
 
 #Loading Compress::Zlib if module is present.
@@ -158,7 +181,7 @@ eval {
     require Compress::Zlib;
     Compress::Zlib->import();
 };
-unless($@) { $gz_loaded = 1; &dbug("Compress::Zlib loaded.") if $debug; }
+unless($@) { $gz_loaded = 1; &dbug("Compress::Zlib loaded."); }
 
 
 # All sorts of variables
@@ -228,6 +251,7 @@ sub ReadConfigFile() {
                 $line =~ /^$coltheme\_tls.*=.*'(.*)'/i        && do { $col->{tls}        = $1; last SWITCH; };
                 $line =~ /^$coltheme\_tlstrust.*=.*'(.*)'/i   && do { $col->{tlstrust}   = $1; last SWITCH; };
 
+
                 # Default variables:
                 if ( $read eq "all" ) {
                     $line =~ /^display_mode.*=.*brief/i                 && do { $brief = 1;                     last SWITCH; };
@@ -244,6 +268,7 @@ sub ReadConfigFile() {
                     $line =~ /^PrintRestOfMessages\s*=\s*(true|on)/i    && do { $PrintRestOfMessages = $1;      last SWITCH; };
                     $line =~ /^Display_deferred_mail.*=\s*(true|on)/i   && do { $display_deferred = $1;         last SWITCH; };
                     $line =~ /^Adjust_terminal_width.*=\s*(true|on)/i   && do { $adjustwidth = $1;              last SWITCH; };
+                    $line =~ /^csv_string.*=\s*(\w+):.*"(.*)"/i         && do { $csv_string->{$1} = $2;         last SWITCH; };
                     $line =~ /^default_logpath\s*=\s*(\S+)/i            && do {
                         $path = $1;
                         if ( $path !~ /\/$/ ) { $path .= "/"; }
@@ -261,55 +286,35 @@ sub ReadConfigFile() {
 sub PrintMailInfo_csv() {
 
     my $msgidto = join( ";", @{ $msg->{$id}->{to} } );
-    if ( $msgidto eq '' ) { $msgidto = '<>'; }
+#    if ( $msgidto eq '' ) { $msgidto = '<>'; }
 
+#    $msg->{$id}->{to}  = join( ";", @{ $msg->{$id}->{to}  } );
     $msg->{$id}->{delay}  = join( ";", @{ $msg->{$id}->{delay}  } );
     $msg->{$id}->{relay}  = join( ";", @{ $msg->{$id}->{relay}  } );
     $msg->{$id}->{status} = join( ";", @{ $msg->{$id}->{status} } );
     $msg->{$id}->{info}   = join( ";", @{ $msg->{$id}->{info}   } );
 
-    if ( defined( $msg->{$id}->{mailscanner} ) ) {
-        if ( $verbose ) {
-            $i = "%s,%s,%s,From:%s,To:%s,Spaminfo:%s,%s,%s,%s,Size:%s,Delay:%s,Status:%s,Relay:%s,Info:%s\n";
-            printf "$i",
-                   $msg->{$id}->{first_seen}, $msg->{$id}->{deleted_time}, $msg->{$id}->{id}, $msg->{$id}->{from}, $msgidto,
-                   $msg->{$id}->{spam_status}, $msg->{$id}->{spam_score}, $msg->{$id}->{spam_score_required},
-                   $msg->{$id}->{spam_score_detail}, $msg->{$id}->{size}, $msg->{$id}->{delay}, $msg->{$id}->{status},
-                   $msg->{$id}->{relay}, $msg->{$id}->{info};
-        }
-        elsif ( $brief ) {
-            $i = "%s,%s,%s,%s,From:%s,To:%s\n";
-            printf "$i",
-                   $msg->{$id}->{deleted_time}, $msg->{$id}->{id}, $msg->{$id}->{status}, $msg->{$id}->{spam_status},
-                        $msg->{$id}->{from}, $msgidto;
-        }
-        else {
-            $i = "%s,%s,%s,%s,From:%s,To:%s,Sent to:%s\n";
-            printf "$i",
-                   $msg->{$id}->{deleted_time}, $msg->{$id}->{id}, $msg->{$id}->{status}, $msg->{$id}->{spam_status},
-                        $msg->{$id}->{from}, $msgidto, $msg->{$id}->{relay},
-        }
-    }
-    else {
-        if ( $verbose ) {
-            $i = "%s,%s,%s,From:%s,To:%s,Size:%s,Delay:%s,Status:%s,Relay:%s,Info:%s\n";
-            printf "$i",
-                   $msg->{$id}->{first_seen}, $msg->{$id}->{deleted_time}, $msg->{$id}->{id}, $msg->{$id}->{from}, $msgidto,
-                   $msg->{$id}->{size}, $msg->{$id}->{delay}, $msg->{$id}->{status}, $msg->{$id}->{relay}, $msg->{$id}->{info};
-        }
-        elsif ( $brief ) {
-            $i = "%s,%s,%s,From:%s,To:%s\n";
-            printf "$i",
-                   $msg->{$id}->{deleted_time}, $msg->{$id}->{id}, $msg->{$id}->{status}, $msg->{$id}->{from}, $msgidto;
+    
+    $csv_format =~ s/\<id\>/$msg->{$id}->{id}/; 
+    $csv_format =~ s/\<deleted_time\>/$msg->{$id}->{deleted_time}/; 
+    $csv_format =~ s/\<from\>/$msg->{$id}->{from}/; 
+#    $csv_format =~ s/\<to\>/$msg->{$id}->{to}/; 
+    $csv_format =~ s/\<to\>/$msgidto/; 
+    $csv_format =~ s/\<server\>/$msg->{$id}->{server}/; 
+    $csv_format =~ s/\<status\>/$msg->{$id}->{status}/; 
+    $csv_format =~ s/\<relay\>/$msg->{$id}->{relay}/; 
+    $csv_format =~ s/\<first_seen\>/$msg->{$id}->{first_seen}/; 
+    $csv_format =~ s/\<delay\>/$msg->{$id}->{delay}/; 
+    $csv_format =~ s/\<client\>/$msg->{$id}->{client}/; 
+    $csv_format =~ s/\<size\>/$msg->{$id}->{size}/; 
+    $csv_format =~ s/\<spam_status\>/$msg->{$id}->{spam_status}/; 
+    $csv_format =~ s/\<spam_score\>/$msg->{$id}->{spam_score}/; 
+    $csv_format =~ s/\<spam_score_required\>/$msg->{$id}->{spam_score_required}/; 
+    $csv_format =~ s/\<spam_score_detail\>/$msg->{$id}->{spam_score_detail}/; 
+    $csv_format =~ s/\<info\>/$msg->{$id}->{info}/; 
 
-        }
-        else {
-            $i = "%s,%s,%s,From:%s,To:%s,Sent to:%s\n";
-            printf "$i",
-                   $msg->{$id}->{deleted_time}, $msg->{$id}->{id}, $msg->{$id}->{status}, $msg->{$id}->{from}, $msgidto,
-                        $msg->{$id}->{relay},
-        }
-    }
+#    $csv_format =~ s/\<.*\>//g;
+    print "$csv_format\n";
 }
 
 
@@ -340,7 +345,7 @@ sub checkpostgreytriple {
 
 sub disableregexp() {
     my $result = $_[0];
-    $result =~ s/(\?|\+|\{|\}|\*|\(|\))/\\$1/g;
+    $result =~ s/(\[|\]|\-|\?|\+|\{|\}|\*|\(|\))/\\$1/g;
     $result =~ s/(\s)/_/g;
     return $result;
 }
@@ -706,7 +711,7 @@ sub printmailinfo {
     unless ( checkpostgreytriple() eq "not ok" ) { 
         if ( defined( $postgreylist->{$_[0]} ) ) { delete $postgreylist->{$_[0]} };
     }
-    dbug("Deleting $id") if $debug;
+    dbug("Deleting $id");
     delete $msg->{ $msg->{$id}->{id1} } if defined $msg->{$id}->{id1};
     delete $msg->{$id};
 }
@@ -851,7 +856,7 @@ sub parsemailscanner {
         $msg->{$2} = $msg->{$1};
         $msg->{$2}->{id1} = $1;
         delete $msg->{$1};
-	    dbug("Got requeue info. $1($id) -> $2") if $debug;
+	    dbug("Got requeue info. $1($id) -> $2");
     }
     elsif ( $line =~ /with subject (.*)/ ) {
          $msg->{$id}->{subject} = $1;
@@ -987,7 +992,7 @@ sub readgzfile {
     my $gz = gzopen($_[0], "r") or die "Cannot open $_[0]: $errno\n" ;
 
     while ($gz->gzreadline( $line ) > 0) {
-        dbug("$line") if $debug;
+        dbug("$line");
         ParseLine( $line );
     }
     $gz->gzclose() ;
@@ -1030,7 +1035,7 @@ $stdin = IO::Select->new();
 $stdin->add(\*STDIN);
 
 if ($stdin->can_read(.5)) {
-    dbug("Reading from <stdin>.") if $debug;
+    dbug("Reading from <stdin>.");
     while ( <STDIN> ) {
         &ParseLine( $_ );
         undef( $logfile );
@@ -1044,9 +1049,9 @@ elsif ( defined( $logfile ) ) {
         $i = $NumberOfFiles - $i;  # We want to parse oldest logs first.
         print "Reading $path$logfile.$i\n" if ( $debug || $maillog_filename );
 
-        if    ( -e "$path$logfile.$i.gz" ) { print ".gz\n"  if $debug; readgzfile( "$path$logfile.$i.gz"  ); }
-        elsif ( -e "$path$logfile.$i.bz" ) { print ".bz2\n" if $debug; readbzfile( "$path$logfile.$i.bz2" ); }
-        elsif ( -e "$path$logfile.$i" )    { print "\n"     if $debug; readfile(   "$path$logfile.$i"     ); }
+        if    ( -e "$path$logfile.$i.gz" ) { print ".gz\n" ; readgzfile( "$path$logfile.$i.gz"  ); }
+        elsif ( -e "$path$logfile.$i.bz" ) { print ".bz2\n"; readbzfile( "$path$logfile.$i.bz2" ); }
+        elsif ( -e "$path$logfile.$i" )    { print "\n"    ; readfile(   "$path$logfile.$i"     ); }
         else { print "Warning!  File not found: $path$logfile.$i(or .gz or .bz2)!\n"; }
     }
 
