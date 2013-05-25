@@ -131,6 +131,8 @@ my $options = GetOptions (
         
 );
 my $address = $ARGV[0] || 'all';
+
+
 die "$helptext" if $help;
 
 
@@ -284,6 +286,7 @@ sub ReadConfigFile() {
 ###
 # Printing info in csv format.
 sub PrintMailInfo_csv() {
+    my $csv_form = $csv_format;
 
     my $msgidto = join( ";", @{ $msg->{$id}->{to} } );
 #    if ( $msgidto eq '' ) { $msgidto = '<>'; }
@@ -295,26 +298,25 @@ sub PrintMailInfo_csv() {
     $msg->{$id}->{info}   = join( ";", @{ $msg->{$id}->{info}   } );
 
     
-    $csv_format =~ s/\<id\>/$msg->{$id}->{id}/; 
-    $csv_format =~ s/\<deleted_time\>/$msg->{$id}->{deleted_time}/; 
-    $csv_format =~ s/\<from\>/$msg->{$id}->{from}/; 
+    $csv_form =~ s/\<id\>/$msg->{$id}->{id}/; 
+    $csv_form =~ s/\<deleted_time\>/$msg->{$id}->{deleted_time}/; 
+    $csv_form =~ s/\<from\>/$msg->{$id}->{from}/; 
 #    $csv_format =~ s/\<to\>/$msg->{$id}->{to}/; 
-    $csv_format =~ s/\<to\>/$msgidto/; 
-    $csv_format =~ s/\<server\>/$msg->{$id}->{server}/; 
-    $csv_format =~ s/\<status\>/$msg->{$id}->{status}/; 
-    $csv_format =~ s/\<relay\>/$msg->{$id}->{relay}/; 
-    $csv_format =~ s/\<first_seen\>/$msg->{$id}->{first_seen}/; 
-    $csv_format =~ s/\<delay\>/$msg->{$id}->{delay}/; 
-    $csv_format =~ s/\<client\>/$msg->{$id}->{client}/; 
-    $csv_format =~ s/\<size\>/$msg->{$id}->{size}/; 
-    $csv_format =~ s/\<spam_status\>/$msg->{$id}->{spam_status}/; 
-    $csv_format =~ s/\<spam_score\>/$msg->{$id}->{spam_score}/; 
-    $csv_format =~ s/\<spam_score_required\>/$msg->{$id}->{spam_score_required}/; 
-    $csv_format =~ s/\<spam_score_detail\>/$msg->{$id}->{spam_score_detail}/; 
-    $csv_format =~ s/\<info\>/$msg->{$id}->{info}/; 
+    $csv_form =~ s/\<to\>/$msgidto/; 
+    $csv_form =~ s/\<server\>/$msg->{$id}->{server}/; 
+    $csv_form =~ s/\<status\>/$msg->{$id}->{status}/; 
+    $csv_form =~ s/\<relay\>/$msg->{$id}->{relay}/; 
+    $csv_form =~ s/\<first_seen\>/$msg->{$id}->{first_seen}/; 
+    $csv_form =~ s/\<delay\>/$msg->{$id}->{delay}/; 
+    $csv_form =~ s/\<client\>/$msg->{$id}->{client}/; 
+    $csv_form =~ s/\<size\>/$msg->{$id}->{size}/; 
+    $csv_form =~ s/\<spam_status\>/$msg->{$id}->{spam_status}/; 
+    $csv_form =~ s/\<spam_score\>/$msg->{$id}->{spam_score}/; 
+    $csv_form =~ s/\<spam_score_required\>/$msg->{$id}->{spam_score_required}/; 
+    $csv_form =~ s/\<spam_score_detail\>/$msg->{$id}->{spam_score_detail}/; 
+    $csv_form =~ s/\<info\>/$msg->{$id}->{info}/; 
 
-#    $csv_format =~ s/\<.*\>//g;
-    print "$csv_format\n";
+    print "$csv_form\n";
 }
 
 
@@ -468,18 +470,17 @@ sub addcolor{
 ###
 # Formatting the info, obviesly!
 sub format_info {
-
     my ( $size, $neg_size, $terminalwidth );
 
+    # Lets set the sender/recipient size based on terminal width:
     if ( $adjustwidth =~ /true|on/i ) {
-        # Lets set the sender/recipient size based on terminal width:
         my @term = GetTerminalSize;
         $terminalwidth = $term[0];
         if ( $brief ) {
             $size = ( $terminalwidth - 31 ) / 2 - 3;
         }
         else {
-            $size = ( $terminalwidth / 2 - 40 );
+            $size = ( $terminalwidth / 2 - 30 );
         }
     }
     else {
@@ -488,13 +489,12 @@ sub format_info {
     }
     $neg_size -= ($size);
  
-    # Formatting length of the variables for easy printing:
-
+    # Adjusting the field length and info:
     # Time
     $msg->{$id}->{deleted_time} = sprintf( "%-12s", $msg->{$id}->{deleted_time} );
 
-    # From
     if ( $brief ) {
+        # From
         if ( length( $msg->{$id}->{from} ) < $size ) { 
             $msg->{$id}->{from} = sprintf( "From: %*s", $neg_size, $msg->{$id}->{from} );
         }
@@ -503,31 +503,39 @@ sub format_info {
         }
     }
     elsif ( $verbose ) {
+        # From
         if ( length( $msg->{$id}->{from} ) < ( $terminalwidth - 12 ) ) { 
             $msg->{$id}->{from} = sprintf( "From: %*s", $neg_size, $msg->{$id}->{from} );
         }
         else {
             $msg->{$id}->{from} = sprintf( "From: %.*s..", $terminalwidth-12, $msg->{$id}->{from} );
         }
+
+        # Client
+        if ( length( $msg->{$id}->{client} ) <  $size ) { 
+            $msg->{$id}->{client} = sprintf( "client=%s", $msg->{$id}->{client} );
+        }
+        else {
+            $msg->{$id}->{client} = sprintf( "client=%.*s..", $size , $msg->{$id}->{client} );
+        }
     }
     else {
+        # From
+        if ( length( $msg->{$id}->{from} ) < $size ) { 
             $msg->{$id}->{from} = sprintf( "From: %*s", $neg_size, $msg->{$id}->{from} );
+        }
+        else {
+            $msg->{$id}->{from} = sprintf( "From: %.*s..", $size-2, $msg->{$id}->{from} );
+        }
     }
 
-    # Mailserver
-    #$msg->{$id}->{server}       = sprintf( "%s", $msg->{$id}->{server} );
-
-    # ID
-    #$msg->{$id}->{id}           = sprintf( "%-12s", $msg->{$id}->{id} );
+    #ID
     if ( "$id" eq "$msg->{$id}->{id}" ) {
         $msg->{$id}->{id} = sprintf( "%-12s", $msg->{$id}->{id} );
     }
     else {
         $msg->{$id}->{id} = sprintf( "%s %s", $msg->{$id}->{id}, $id );
     }
-
-    #Client
-    $msg->{$id}->{client} = sprintf( "client=%s", $msg->{$id}->{client} );
 
     #Size
     $msg->{$id}->{size} = sprintf( "size=%s", $msg->{$id}->{size} );
@@ -547,37 +555,43 @@ sub format_info {
         $msg->{$id}->{status}[$i] = sprintf( "%-8s", $msg->{$id}->{status}[$i] );
 
         #To
-        if ( length( $msg->{$id}->{to}[$i] ) < $size ) { 
-            $msg->{$id}->{to}[$i] = sprintf( "To: %*s", $neg_size, $msg->{$id}->{to}[$i] );
+        if ( $verbose ) {
+            if ( length( $msg->{$id}->{to}[$i] ) < $terminalwidth - 21 ) { 
+                $msg->{$id}->{to}[$i] = sprintf( "To: %*s", $neg_size, $msg->{$id}->{to}[$i] );
+            }
+            else {
+                $msg->{$id}->{to}[$i] = sprintf( "To: %.*s..", $terminalwidth - 21, $msg->{$id}->{to}[$i] );
+            }
         }
         else {
-            $msg->{$id}->{to}[$i] = sprintf( "To: %.*s..", $size-2, $msg->{$id}->{to}[$i] );
+            if ( length( $msg->{$id}->{to}[$i] ) < $size ) { 
+                $msg->{$id}->{to}[$i] = sprintf( "To: %*s", $neg_size, $msg->{$id}->{to}[$i] );
+            }
+            else {
+                $msg->{$id}->{to}[$i] = sprintf( "To: %.*s..", $size-2, $msg->{$id}->{to}[$i] );
+            }
         }
 
         #Delay
-        #if ( $msg->{$id}->{delay}[$i] =~ /^\d+$/ ) {
         $msg->{$id}->{delay}[$i] = sprintf( "Delay: %s", formattime( $msg->{$id}->{delay}[$i] ) );
-        #}
 
         # Info
-        if ( $msg->{$id}->{status}[$i] eq 'deferred' ) {
-                $msg->{$id}->{info}[$i] = $msg->{$id}->{extinfo}[$i];
-        }
+        #if ( $msg->{$id}->{status}[$i] eq 'deferred' ) {
+        $msg->{$id}->{info}[$i] = $msg->{$id}->{extinfo}[$i] if $msg->{$id}->{status}[$i] eq 'deferred';
         if ( defined( $msg->{$id}->{info}[$i] ) ) {
-            if ( $msg->{$id}->{info}[$i] =~ /(.*;) http:\/\// ) { $msg->{$id}->{info}[$i] = $1 };
-            if ( length( $msg->{$id}->{info}[$i] ) > $size ) { 
-                $msg->{$id}->{info}[$i] = sprintf( "Info: %.*s..", ($terminalwidth - $size -12) , $msg->{$id}->{info}[$i] );
+            if ( length( $msg->{$id}->{info}[$i] ) > ( $terminalwidth - 18 ) ) { 
+                $msg->{$id}->{info}[$i] = sprintf( "Info: %.*s..", $terminalwidth - 18, $msg->{$id}->{info}[$i] );
             }
             else {
-                $msg->{$id}->{info}[$i] = sprintf( "Info: %.*s", $terminalwidth - 82, $msg->{$id}->{info}[$i] );
+                $msg->{$id}->{info}[$i] = sprintf( "Info: %s", $msg->{$id}->{info}[$i] );
             }
         }
 
         # Relay
         if ( defined( $msg->{$id}->{relay}[$i] ) ) {
             if ( $msg->{$id}->{relay}[$i] !~ /(thrashcan|Never received|<!>)/ ) {
-                if ( length( $msg->{$id}->{relay}[$i] ) > ( $terminalwidth - ( $terminalwidth - $size ) - 14 ) ) { 
-                    $msg->{$id}->{relay}[$i] = sprintf( "relayed to: %.*s..", ($terminalwidth - ( $terminalwidth - $size ) - 2 ),
+                if ( length( $msg->{$id}->{relay}[$i] ) > ( ( $size + 20 ) ) ) { 
+                    $msg->{$id}->{relay}[$i] = sprintf( "relayed to: %.*s..", ( $size + 20 ),
                         $msg->{$id}->{relay}[$i] );
                 }
                 else {
@@ -640,7 +654,8 @@ sub Printmailinfo_visual {
             print "\t$msg->{$id}->{delay}[$i] $msg->{$id}->{relay}[$i]\n";
 
             #Info:
-            print "\t$msg->{$id}->{info}[$i]\n";
+            print "\t$msg->{$id}->{info}[$i]\n" if defined( $msg->{$id}->{info}[$i] );
+            print "\t$msg->{$id}->{extinfo}[$i]\n" if defined( $msg->{$id}->{extinfo}[$i] );
             if ( defined( $msg->{$id}->{dovecotinfo}[$i] ) ) {
                 print "\t      $msg->{$id}->{dovecotinfo}[$i]\n";
             }
@@ -659,7 +674,7 @@ sub Printmailinfo_visual {
             print "$msg->{$id}->{deleted_time} $msg->{$id}->{from} $msg->{$id}->{id}\n";
         }
         for $i ( 0..$#{ $msg->{$id}->{status} } ) {
-            print "\t$msg->{$id}->{status}[$i]  $msg->{$id}->{to}[$i] $msg->{$id}->{relay}[$i]\n";
+            print "\t$msg->{$id}->{status}[$i]  $msg->{$id}->{to}[$i] $msg->{$id}->{relay}[$i]\n\n";
         }
     }
 }
