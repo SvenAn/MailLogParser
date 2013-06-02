@@ -31,8 +31,8 @@ mlp.pl [-vblncdxdah] <mail address>
         "b|brief"     = Prints only some info about the mail.
         "l|logfile:s" = [path and filename] Specify which logfile to read.
         "n|num"       = [integer] How many generation of files to read.
-        "c|csv"       = Prints output in csv format. This option can be used
-			            along with the -v or -b options.
+        "c|csv"       = Prints output in csv format.
+        "csvtype"     = What kind of csv output would you like? See mlp.conf for details.
         "d|debug"     = Prints debug info.
         "xd|xdebug"   = Will provide extensive debug info about all processed
 			            lines. (will output a LOT of debug info).
@@ -84,7 +84,7 @@ my $col = {
 my ( $verbose, $brief, $file, $help, $csv, $debug, $xdebug, $color, $stdin, $tlsinfo,
     $date_change, $my_printed_date, $maillog_filename, $display_mailserver, $warnings,
     $PrintRestOfMessages, $display_deferred, $adjustwidth, $NumberOfFiles, $csv_string,
-    $csv_type, $csv_format );
+    $csv_type, $csv_format, $csv_alt_comma );
 
 
 sub dbug {
@@ -136,8 +136,10 @@ my $address = $ARGV[0] || 'all';
 die "$helptext" if $help;
 
 
+# We need to make a number of adjustments if chosen output is csv:
 if ( $csv ) {
     $csv_type = "none" if ! defined( $csv_type );
+    $csv_alt_comma = ";" if ! defined( $csv_alt_comma );
     $warnings = "no";
     $date_change = "no";
 
@@ -145,10 +147,13 @@ if ( $csv ) {
         $csv_format = $csv_string->{$csv_type};
     }
     else {
-        $csv_format = "<id>,<deleted_time>,<from>,<to>,<server>,<status>,<relay>";
+        $csv_format = "<|id|>,<|deleted_time|>,<|from|>,<|to|>,<|server|>,<|status|>,<|relay|>";
     }
 
-    print "$csv_format\n";
+    # Let's make the first line a description of the various fields:
+    $i = $csv_format;
+    $i =~ s/\<\||\|\>//g;
+    print "$i\n";
     &dbug("csvformat = $csv_format");
 }
 
@@ -253,7 +258,6 @@ sub ReadConfigFile() {
                 $line =~ /^$coltheme\_tls.*=.*'(.*)'/i        && do { $col->{tls}        = $1; last SWITCH; };
                 $line =~ /^$coltheme\_tlstrust.*=.*'(.*)'/i   && do { $col->{tlstrust}   = $1; last SWITCH; };
 
-
                 # Default variables:
                 if ( $read eq "all" ) {
                     $line =~ /^display_mode.*=.*brief/i                 && do { $brief = 1;                     last SWITCH; };
@@ -271,6 +275,7 @@ sub ReadConfigFile() {
                     $line =~ /^Display_deferred_mail.*=\s*(true|on)/i   && do { $display_deferred = $1;         last SWITCH; };
                     $line =~ /^Adjust_terminal_width.*=\s*(true|on)/i   && do { $adjustwidth = $1;              last SWITCH; };
                     $line =~ /^csv_string.*=\s*(\w+):.*"(.*)"/i         && do { $csv_string->{$1} = $2;         last SWITCH; };
+                    $line =~ /^csv_comma_alternative.*=\s*"(.*)"/i      && do { $csv_alt_comma = $1;            last SWITCH; };
                     $line =~ /^default_logpath\s*=\s*(\S+)/i            && do {
                         $path = $1;
                         if ( $path !~ /\/$/ ) { $path .= "/"; }
@@ -288,6 +293,11 @@ sub ReadConfigFile() {
 sub PrintMailInfo_csv() {
     my $csv_form = $csv_format;
 
+    # Let's make sure no extra comma's sneaks in:
+    for $i ( keys $msg->{$id} ) {
+        $msg->{$id}->{$i} =~ s/,/$csv_alt_comma/g;
+    }
+
     my $msgidto = join( ";", @{ $msg->{$id}->{to} } );
 #    if ( $msgidto eq '' ) { $msgidto = '<>'; }
 
@@ -298,24 +308,27 @@ sub PrintMailInfo_csv() {
     $msg->{$id}->{info}   = join( ";", @{ $msg->{$id}->{info}   } );
 
     
-    $csv_form =~ s/\<id\>/$msg->{$id}->{id}/; 
-    $csv_form =~ s/\<deleted_time\>/$msg->{$id}->{deleted_time}/; 
-    $csv_form =~ s/\<from\>/$msg->{$id}->{from}/; 
+    $csv_form =~ s/\<\|id\|\>/$msg->{$id}->{id}/; 
+    $csv_form =~ s/\<\|deleted_time\|\>/$msg->{$id}->{deleted_time}/; 
+    $csv_form =~ s/\<\|from\|\>/$msg->{$id}->{from}/; 
 #    $csv_format =~ s/\<to\>/$msg->{$id}->{to}/; 
-    $csv_form =~ s/\<to\>/$msgidto/; 
-    $csv_form =~ s/\<server\>/$msg->{$id}->{server}/; 
-    $csv_form =~ s/\<status\>/$msg->{$id}->{status}/; 
-    $csv_form =~ s/\<relay\>/$msg->{$id}->{relay}/; 
-    $csv_form =~ s/\<first_seen\>/$msg->{$id}->{first_seen}/; 
-    $csv_form =~ s/\<delay\>/$msg->{$id}->{delay}/; 
-    $csv_form =~ s/\<client\>/$msg->{$id}->{client}/; 
-    $csv_form =~ s/\<size\>/$msg->{$id}->{size}/; 
-    $csv_form =~ s/\<spam_status\>/$msg->{$id}->{spam_status}/; 
-    $csv_form =~ s/\<spam_score\>/$msg->{$id}->{spam_score}/; 
-    $csv_form =~ s/\<spam_score_required\>/$msg->{$id}->{spam_score_required}/; 
-    $csv_form =~ s/\<spam_score_detail\>/$msg->{$id}->{spam_score_detail}/; 
-    $csv_form =~ s/\<info\>/$msg->{$id}->{info}/; 
+    $csv_form =~ s/\<\|to\|\>/$msgidto/; 
+    $csv_form =~ s/\<\|server\|\>/$msg->{$id}->{server}/; 
+    $csv_form =~ s/\<\|status\|\>/$msg->{$id}->{status}/; 
+    $csv_form =~ s/\<\|relay\|\>/$msg->{$id}->{relay}/; 
+    $csv_form =~ s/\<\|first_seen\|\>/$msg->{$id}->{first_seen}/; 
+    $csv_form =~ s/\<\|delay\|\>/$msg->{$id}->{delay}/; 
+    $csv_form =~ s/\<\|client\|\>/$msg->{$id}->{client}/; 
+    $csv_form =~ s/\<\|size\|\>/$msg->{$id}->{size}/; 
+    $csv_form =~ s/\<\|spam_status\|\>/$msg->{$id}->{spam_status}/ if defined( $msg->{$id}->{spam_status} ); 
+    $csv_form =~ s/\<\|spam_score\|\>/$msg->{$id}->{spam_score}/   if defined( $msg->{$id}->{spam_score}  ); 
+    $csv_form =~ s/\<\|spam_score_required\|\>/$msg->{$id}->{spam_score_required}/ if defined( $msg->{$id}->{spam_score_required} ); 
+    $csv_form =~ s/\<\|spam_score_detail\|\>/$msg->{$id}->{spam_score_detail}/ if defined( $msg->{$id}->{spam_score_detail} ); 
+    $csv_form =~ s/\<\|info\|\>/$msg->{$id}->{info}/; 
 
+    # Let's remove empty fields:
+    $csv_form =~ s/\<\|.*?\|\>//g;
+   
     print "$csv_form\n";
 }
 
@@ -914,7 +927,7 @@ sub ParseLine {
     $lines++;
     chomp( $_[0] );
 
-    if (  $_[0] =~ /(warning:.*)/i && $warnings ) {
+    if (  $_[0] =~ /(warning:.*)/i && $warnings =~ /(on|true)/ ) {
         print "$1\n";
     }
 
