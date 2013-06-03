@@ -6,7 +6,7 @@
 # in a simple, human readable format.             #
 ###                                             ###
 
-my $version = 'v.008';
+my $version = 'v.010';
 
 
 use strict;
@@ -80,9 +80,11 @@ my $col = {
     tlstrust      => 'BOLD GREEN',
 };
 
+my $warnings = "off";
+
 
 my ( $verbose, $brief, $file, $help, $csv, $debug, $xdebug, $color, $stdin, $tlsinfo,
-    $date_change, $my_printed_date, $maillog_filename, $display_mailserver, $warnings,
+    $date_change, $my_printed_date, $maillog_filename, $display_mailserver, 
     $PrintRestOfMessages, $display_deferred, $adjustwidth, $NumberOfFiles, $csv_string,
     $csv_type, $csv_format, $csv_alt_comma );
 
@@ -95,6 +97,13 @@ sub dbug {
     }
 }
 
+sub xdbug {
+    if ( $xdebug ) {
+        my $txt = $_[0];
+        print color "BRIGHT_BLACK" if $color;
+        print "XDebug: $txt\n";
+    }
+}
 
 &ReadConfigFile("all"); # We want to read default config before processing command line options;
 
@@ -291,45 +300,34 @@ sub ReadConfigFile() {
 ###
 # Printing info in csv format.
 sub PrintMailInfo_csv() {
-    my $csv_form = $csv_format;
+    my $csv_form;
 
-    # Let's make sure no extra comma's sneaks in:
-    for $i ( keys $msg->{$id} ) {
-        $msg->{$id}->{$i} =~ s/,/$csv_alt_comma/g;
+    # One line for each recipient:
+    for $j (0..$#{$msg->{$id}->{to}}) {
+        $csv_form = $csv_format;
+
+        # Put info into the csv-formatted csv-line:
+        for $i ( keys %{$msg->{$id}} ) {
+            $msg->{$id}->{$i} =~ s/,/$csv_alt_comma/g;
+        
+            if ( $i =~ /^(to|orig_to|delay|relay|status|info)$/ ) {
+                if ( defined( ${$msg->{$id}->{$i}}[$j] ) ) {
+                    $csv_form =~ s/\<\|$i\|\>/${$msg->{$id}->{$i}}[$j]/;
+                }
+                else {
+                    $csv_form =~ s/\<\|$i\|\>/UNKNOWN/;
+                }
+            }
+            else {
+                $csv_form =~ s/\<\|$i\|\>/$msg->{$id}->{$i}/;
+            }
+        }
+
+        # Clear all tables without info:
+        $csv_form =~ s/\<\|.*?\|\>//g;
+
+        print "$csv_form\n";
     }
-
-    my $msgidto = join( ";", @{ $msg->{$id}->{to} } );
-#    if ( $msgidto eq '' ) { $msgidto = '<>'; }
-
-#    $msg->{$id}->{to}  = join( ";", @{ $msg->{$id}->{to}  } );
-    $msg->{$id}->{delay}  = join( ";", @{ $msg->{$id}->{delay}  } );
-    $msg->{$id}->{relay}  = join( ";", @{ $msg->{$id}->{relay}  } );
-    $msg->{$id}->{status} = join( ";", @{ $msg->{$id}->{status} } );
-    $msg->{$id}->{info}   = join( ";", @{ $msg->{$id}->{info}   } );
-
-    
-    $csv_form =~ s/\<\|id\|\>/$msg->{$id}->{id}/; 
-    $csv_form =~ s/\<\|deleted_time\|\>/$msg->{$id}->{deleted_time}/; 
-    $csv_form =~ s/\<\|from\|\>/$msg->{$id}->{from}/; 
-#    $csv_format =~ s/\<to\>/$msg->{$id}->{to}/; 
-    $csv_form =~ s/\<\|to\|\>/$msgidto/; 
-    $csv_form =~ s/\<\|server\|\>/$msg->{$id}->{server}/; 
-    $csv_form =~ s/\<\|status\|\>/$msg->{$id}->{status}/; 
-    $csv_form =~ s/\<\|relay\|\>/$msg->{$id}->{relay}/; 
-    $csv_form =~ s/\<\|first_seen\|\>/$msg->{$id}->{first_seen}/; 
-    $csv_form =~ s/\<\|delay\|\>/$msg->{$id}->{delay}/; 
-    $csv_form =~ s/\<\|client\|\>/$msg->{$id}->{client}/; 
-    $csv_form =~ s/\<\|size\|\>/$msg->{$id}->{size}/; 
-    $csv_form =~ s/\<\|spam_status\|\>/$msg->{$id}->{spam_status}/ if defined( $msg->{$id}->{spam_status} ); 
-    $csv_form =~ s/\<\|spam_score\|\>/$msg->{$id}->{spam_score}/   if defined( $msg->{$id}->{spam_score}  ); 
-    $csv_form =~ s/\<\|spam_score_required\|\>/$msg->{$id}->{spam_score_required}/ if defined( $msg->{$id}->{spam_score_required} ); 
-    $csv_form =~ s/\<\|spam_score_detail\|\>/$msg->{$id}->{spam_score_detail}/ if defined( $msg->{$id}->{spam_score_detail} ); 
-    $csv_form =~ s/\<\|info\|\>/$msg->{$id}->{info}/; 
-
-    # Let's remove empty fields:
-    $csv_form =~ s/\<\|.*?\|\>//g;
-   
-    print "$csv_form\n";
 }
 
 
@@ -360,7 +358,8 @@ sub checkpostgreytriple {
 
 sub disableregexp() {
     my $result = $_[0];
-    $result =~ s/(\[|\]|\-|\?|\+|\{|\}|\*|\(|\))/\\$1/g;
+    $result =~ s/(\[|\]|\-|\?|\+|\{|\}|\*|\(|\)|\@|\.)/\\$1/g;
+    #$result =~ s/(.)/\\$1/g;
     $result =~ s/(\s)/_/g;
     return $result;
 }
@@ -370,7 +369,9 @@ sub uniquerecipient {
     my $addr = &disableregexp( $_[0] );
     if ( defined ( $msg->{$id}->{to} ) ) {
         for $i ( 0 .. $#{ $msg->{$id}->{to} } ) {
-            if ( &disableregexp( ${ $msg->{$id}->{to} }[$i] ) =~ /$addr/i ) { return "nope" }
+            $j = &disableregexp( ${ $msg->{$id}->{to} }[$i] );
+            #if ( $j =~ /$addr/i ) { xdebug("Returning nope"); return "nope" }
+            if ( lc($j) eq lc($addr) ) { return "nope" }
         }
     }
     return "yes";
@@ -687,8 +688,9 @@ sub Printmailinfo_visual {
             print "$msg->{$id}->{deleted_time} $msg->{$id}->{from} $msg->{$id}->{id}\n";
         }
         for $i ( 0..$#{ $msg->{$id}->{status} } ) {
-            print "\t$msg->{$id}->{status}[$i]  $msg->{$id}->{to}[$i] $msg->{$id}->{relay}[$i]\n\n";
+            print "\t$msg->{$id}->{status}[$i]  $msg->{$id}->{to}[$i] $msg->{$id}->{relay}[$i]\n";
         }
+        print "\n";
     }
 }
 
@@ -696,7 +698,7 @@ sub Printmailinfo_visual {
 ###
 # Printing the result in chosen format.
 sub printmailinfo {
-    # Filling the holes of incomplete records...
+    # Filling the holes of incomplete records before I check wether to print info...
     unless ( defined( $msg->{$id}->{from}    ) ) { $msg->{$id}->{from}    =  '<!>'  }
     unless ( defined( $msg->{$id}->{to}      ) ) { $msg->{$id}->{to}      = ['<!>'] }
     unless ( defined( $msg->{$id}->{orig_to} ) ) { $msg->{$id}->{orig_to} = ['<!>'] }
@@ -712,12 +714,15 @@ sub printmailinfo {
         unless ( defined( $msg->{$id}->{first_seen}   ) ) { $msg->{$id}->{first_seen}   =  '<!>'  }
         unless ( defined( $msg->{$id}->{deleted_time} ) ) { $msg->{$id}->{deleted_time} =  '<!>'  }
         unless ( defined( $msg->{$id}->{size}   )       ) { $msg->{$id}->{size}         =  '<!>'  }
-        unless ( defined( $msg->{$id}->{delay}  )       ) { $msg->{$id}->{delay}        = ['<!>'] }
-        unless ( defined( $msg->{$id}->{status} )       ) { $msg->{$id}->{status}       = ['<!>'] }
-        unless ( defined( $msg->{$id}->{relay}  )       ) { $msg->{$id}->{relay}        = ['<!>'] }
-        unless ( defined( $msg->{$id}->{info}   )       ) { $msg->{$id}->{info}         = ['<!>'] }
         unless ( defined( $msg->{$id}->{client} )       ) { $msg->{$id}->{client}       =  '<!>'  }
-        #unless ( defined( $msg->{$id}->{dovecotinfo} )  ) { $msg->{$id}->{dovecotinfo}  = ['<!>'] }
+
+        for $i ( 0..$#{$msg->{$id}->{to}} ) {
+            unless ( defined( ${$msg->{$id}->{delay}}[$i]   ) ) { ${$msg->{$id}->{delay}}[$i]   = '<!>' }
+            unless ( defined( ${$msg->{$id}->{orig_to}}[$i] ) ) { ${$msg->{$id}->{orig_to}}[$i] = '<!>' }
+            unless ( defined( ${$msg->{$id}->{status}}[$i]  ) ) { ${$msg->{$id}->{status}}[$i]  = '<!>' }
+            unless ( defined( ${$msg->{$id}->{relay}}[$i]   ) ) { ${$msg->{$id}->{relay}}[$i]   = '<!>' }
+            unless ( defined( ${$msg->{$id}->{info}}[$i]    ) ) { ${$msg->{$id}->{info}}[$i]    = '<!>' }
+        }
 
         if ( defined( $msg->{$id}->{mailscanner} ) ) {
             unless ( defined( $msg->{$id}->{spam_status} )       ) { $msg->{$id}->{spam_status}         = '<!>' }
@@ -748,7 +753,6 @@ sub printmailinfo {
 ###
 # Parsing the postfix log line extracting all necessary info into the mailbox hash.
 sub parsepostfix {
-    # We want $time to contain both $date and $time:
     $time = "$date $time";
 
     # Find message or create new hash
@@ -757,49 +761,74 @@ sub parsepostfix {
     if ( $cmd eq 'qmgr' ) {
         if ( $line =~ /^removed$/ ) {
             $msg->{$id}->{deleted_time} = $time;
-	        print "\tDebug: Got remove info, printing mail.\n" if $xdebug;
             $readytoprint->{$id} = 1; 
+	        xdbug( "Message removed, printing mail." );
         } 
         else {
-            print "\tDebug: parsing $line\n" if $xdebug;
-            $msg->{$id}->{from} = $1 if $line =~ /from=<([^>]+)>/;
-            $msg->{$id}->{from} = $1 if $line =~ /from=(\<\>)/;
-            $msg->{$id}->{size} = $1 if $line =~ /size=(\d+)/;
+            xdbug( "Parsing <<$line>>" );
+            if ( $line =~ /from=<([^>]+)>/ || $line =~ /from=(\<\>)/ ) {
+                $msg->{$id}->{from} = $1 ;
+                xdbug( "Got from $1." );
+            }
+            if ( $line =~ /size=(\d+)/ ) {
+                $msg->{$id}->{size} = $1;
+                xdbug( "Got size $1." );
+            }
             $msg->{$id}->{first_seen} = $time;
-	        print "\tDebug: Got from/size/first_seen info.\n" if $xdebug;
-	        print "\tDebug: $msg->{$id}->{from}, $msg->{$id}->{size}, $msg->{$id}->{first_seen}\n" if $xdebug;
+            xdbug( "Got first_seen $time." );
         }
     }
     elsif ( $cmd eq 'cleanup' ) {
         $msg->{$id}->{first_seen} = $time;
-        #$msg->{$id}->{msgid} = $1 if $line =~ /^message-id=(<[^>]+>)/ ;
-        $msg->{$id}->{msgid} = $1 if $line =~ /^message-id=<(.*)>/ ;
-        $msg->{$id}->{from} = $1 if $line =~ /from=<([^>]+)>/;
-        $msg->{$id}->{from} = $1 if $line =~ /from=(\<\>)/;
-        push @{ $msg->{$id}->{to} }, $1 if $line =~/to=<([^>]+)>/;
-	    print "\tDebug: Got first_seen,msgid,from,to info.\n" if $xdebug;
+        xdbug( "Got first_seen $time." );
+        if ( $line =~ /^message-id=<(.*)>/ ) {
+            $msg->{$id}->{msgid} = $1;
+            xdbug( "Got msgid $1." );
+        }
+        if ( $line =~ /from=<([^>]+)>/ || $line =~ /from=(\<\>)/ ) {
+            $msg->{$id}->{from}  = $1;
+            xdbug( "Got from $1." );
+        }
+        if ( $line =~/to=<([^>]+)>/ ) {
+            if ( uniquerecipient( $1 ) eq "yes") { 
+                push @{ $msg->{$id}->{to} }, $1;
+                xdbug( "Got to $1." );
+            }
+        }
     }
     elsif ( $cmd eq 'smtpd'  && $line =~ /^(reject):/ ) {
         push @{ $msg->{$id}->{status} }, $1;
-        push @{ $msg->{$id}->{to}     }, $1 if $line =~/to=<([^>]+)>/;
-        push @{ $msg->{$id}->{info}   }, $1 if $line =~ /RCPT from .*\]: (\d{3} \d\.\d\.\d .*);/;
+        xdbug( "Got status $1." );
+
+        if ( $line =~/to=<([^>]+)>/ ) {
+            if ( uniquerecipient( $1 ) eq "yes") { 
+                push @{ $msg->{$id}->{to} }, $1;
+                xdbug( "Got to $1." );
+            }
+        }
+        if ( $line =~ /RCPT from .*\]: (\d{3} \d\.\d\.\d .*);/ ) {
+            push @{ $msg->{$id}->{info}   }, $1;
+            xdbug( "Got info $1." );
+        } 
         push @{ $msg->{$id}->{delay} }, 0;
         push @{ $msg->{$id}->{relay} }, 'Never received message.';
         $msg->{$id}->{deleted_time} = $time;
         $msg->{$id}->{from} = $1 if $line =~ /from=<([^>]+)>/;
         $msg->{$id}->{client} = $1 if $line =~ /RCPT from (.*]): /;
         $msg->{$id}->{size} = 'unknown';
-	    print "\tDebug: Got reject info, printing mail.\n" if $xdebug;
+	    xdbug( "Got reject info, printing mail." );
+
         printmailinfo( $msg->{$id} ); 
         #$readytoprint->{$id} = 1; 
     }
     elsif ( $cmd =~ /(virtual|smtp|error|local)/) {
-        if ( $line =~ /orig_to=<([^>]+)>/ ) {
-            push @{ $msg->{$id}->{to} }, $1 if uniquerecipient( $1 ) eq "yes";
-            push @{ $msg->{$id}->{orig_to} }, $1 if uniquerecipient( $1 ) eq "yes";
+        if ( $line =~ /orig_to=<([^>]+)>/ && uniquerecipient( $1 ) eq "yes" ) {
+            push @{ $msg->{$id}->{orig_to} }, $1;
+            xdbug( "Got orig_to $1." );
         }
         elsif ( $line =~ /to=<([^>]+)>/ && uniquerecipient( $1 ) eq "yes" ) {
             push @{ $msg->{$id}->{to} }, $1;
+            xdbug( "Got to $1. (2)" );
         }
 
         push @{ $msg->{$id}->{delay}  }, $1 if $line =~ /delay=(\d+)/;
@@ -884,7 +913,7 @@ sub parsemailscanner {
         $msg->{$2} = $msg->{$1};
         $msg->{$2}->{id1} = $1;
         delete $msg->{$1};
-	    dbug("Got requeue info. $1($id) -> $2");
+	    dbug("Got requeue info. $1($id) -> $2") if ( defined( $id ) );
     }
     elsif ( $line =~ /with subject (.*)/ ) {
          $msg->{$id}->{subject} = $1;
@@ -934,7 +963,7 @@ sub ParseLine {
     # Check if line is in a known Postfix format:
     if ( $_[0] =~ /^(\w\w\w\s{1,2}\d{1,2}) (\d\d:\d\d:\d\d) (.*) postfix\/(\w+)\[\d+\]: ([0-9A-Z]+): (.*)/ ) {
         ( $date, $time, $server, $cmd, $id, $line ) = ( $1, $2, $3, $4, $5, $6 );
-        print "\tDebug: Parsing (Postfix): <$_>\n" if $xdebug;
+        xdbug( "Parsing (Postfix): <<$_>>" );
         check_date_change() if $date_change =~ /on|true/i;
         parsepostfix( $_ );
     }
@@ -943,7 +972,7 @@ sub ParseLine {
     elsif ( $_[0] =~ /^(\w\w\w\s{1,2}\d{1,2} \d\d:\d\d:\d\d) (\w+) MailScanner\[\d+\]: (.*)/ ) {
         ( $time, $server, $line ) = ( $1, $2 ,$3 );
         $Mailscanner = 1;
-        print "\tDebug: Parsing (Mailscanner): <$_>\n" if $xdebug;
+        xdbug( "Parsing (Mailscanner): <<$_>>" );
         parsemailscanner( $_ );
     }
 
@@ -951,26 +980,26 @@ sub ParseLine {
     elsif ( $_[0] =~ /^(\w\w\w\s{1,2}\d{1,2} \d\d:\d\d:\d\d) (\w+) postgrey\[\d+\]: (.*)/ ) {
         ( $time, $server, $line ) = ( $1, $2 ,$3 );
         $Postgrey = 1;
-        print "\tDebug: Parsing (Postgrey): <$_>\n" if $xdebug;
+        xdbug( "Parsing (Postgrey): <<$_>>" );
         parsepostgrey( $_ );
     }
 
     # Check if line is in a known TLS format:
     elsif ( $_[0] =~ /^(\w\w\w\s{1,2}\d{1,2} \d\d:\d\d:\d\d) .* postfix\/\w+\[\d+\]: (\w+ TLS connection established .*)/ ) {
         ( $time, $line ) = ( $1, $2 );
-        print "\tDebug: Parsing (TLS): <$_>\n" if $xdebug;
+        xdbug( "Parsing (tls): <<$_>>" );
         parsetls( $_ );
     }
 
     # Check if line is in a known Dovecot format:
     elsif ( $_[0] =~ /^(\w\w\w\s{1,2}\d{1,2} \d\d:\d\d:\d\d) .* dovecot: (.*)/ ) {
         ( $time, $line ) = ( $1, $2 );
-        print "\tDebug: Parsing (dovecot): <$_>\n" if $xdebug;
+        xdbug( "Parsing (dovecot): <<$_>>" );
         parsedovecot( $_ );
     }
 
     else {
-        print "\tDebug: No known format: <$_>\n" if $xdebug;
+        xdbug( "No known format: <<$_>>" );
     }
 
     # This little loop checks if there are any mail that has been marked as 'ready to print', and that mlp has
