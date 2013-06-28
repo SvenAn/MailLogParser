@@ -963,7 +963,7 @@ sub ParseLine {
     # Check if line is in a known Postfix format:
     if ( $_[0] =~ /^(\w\w\w\s{1,2}\d{1,2}) (\d\d:\d\d:\d\d) (.*) postfix\/(\w+)\[\d+\]: ([0-9A-Z]+): (.*)/ ) {
         ( $date, $time, $server, $cmd, $id, $line ) = ( $1, $2, $3, $4, $5, $6 );
-        xdbug( "Parsing (Postfix): <<$_>>" );
+        xdbug( "Parsing (Postfix): <<$_[0]>>" );
         check_date_change() if $date_change =~ /on|true/i;
         parsepostfix( $_ );
     }
@@ -972,7 +972,7 @@ sub ParseLine {
     elsif ( $_[0] =~ /^(\w\w\w\s{1,2}\d{1,2} \d\d:\d\d:\d\d) (\w+) MailScanner\[\d+\]: (.*)/ ) {
         ( $time, $server, $line ) = ( $1, $2 ,$3 );
         $Mailscanner = 1;
-        xdbug( "Parsing (Mailscanner): <<$_>>" );
+        xdbug( "Parsing (Mailscanner): <<$_[0]>>" );
         parsemailscanner( $_ );
     }
 
@@ -980,26 +980,26 @@ sub ParseLine {
     elsif ( $_[0] =~ /^(\w\w\w\s{1,2}\d{1,2} \d\d:\d\d:\d\d) (\w+) postgrey\[\d+\]: (.*)/ ) {
         ( $time, $server, $line ) = ( $1, $2 ,$3 );
         $Postgrey = 1;
-        xdbug( "Parsing (Postgrey): <<$_>>" );
+        xdbug( "Parsing (Postgrey): <<$_[0]>>" );
         parsepostgrey( $_ );
     }
 
     # Check if line is in a known TLS format:
     elsif ( $_[0] =~ /^(\w\w\w\s{1,2}\d{1,2} \d\d:\d\d:\d\d) .* postfix\/\w+\[\d+\]: (\w+ TLS connection established .*)/ ) {
         ( $time, $line ) = ( $1, $2 );
-        xdbug( "Parsing (tls): <<$_>>" );
+        xdbug( "Parsing (tls): <<$_[0]>>" );
         parsetls( $_ );
     }
 
     # Check if line is in a known Dovecot format:
     elsif ( $_[0] =~ /^(\w\w\w\s{1,2}\d{1,2} \d\d:\d\d:\d\d) .* dovecot: (.*)/ ) {
         ( $time, $line ) = ( $1, $2 );
-        xdbug( "Parsing (dovecot): <<$_>>" );
+        xdbug( "Parsing (dovecot): <<$_[0]>>" );
         parsedovecot( $_ );
     }
 
     else {
-        xdbug( "No known format: <<$_>>" );
+        xdbug( "No known format: <<$_[0]>>" );
     }
 
     # This little loop checks if there are any mail that has been marked as 'ready to print', and that mlp has
