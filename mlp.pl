@@ -80,11 +80,11 @@ my $col = {
     tlstrust      => 'BOLD GREEN',
 };
 
-my $warnings = "off";
+my ( $warnings, $date_change ) = "off";
 
 
 my ( $verbose, $brief, $file, $help, $csv, $debug, $xdebug, $color, $stdin, $tlsinfo,
-    $date_change, $my_printed_date, $maillog_filename, $display_mailserver, 
+    $my_printed_date, $maillog_filename, $display_mailserver, 
     $PrintRestOfMessages, $display_deferred, $adjustwidth, $NumberOfFiles, $csv_string,
     $csv_type, $csv_format, $csv_alt_comma );
 
@@ -563,7 +563,7 @@ sub format_info {
 
 
     # Format info on each recipient.
-    for $i ( 0..$#{ $msg->{$id}->{info} } ) {
+    for $i ( 0..$#{ $msg->{$id}->{to} } ) {
 
         #status
         $msg->{$id}->{status}[$i] = sprintf( "%-8s", $msg->{$id}->{status}[$i] );
@@ -590,9 +590,20 @@ sub format_info {
         $msg->{$id}->{delay}[$i] = sprintf( "Delay: %s", formattime( $msg->{$id}->{delay}[$i] ) );
 
         # Info
-        #if ( $msg->{$id}->{status}[$i] eq 'deferred' ) {
-        $msg->{$id}->{info}[$i] = $msg->{$id}->{extinfo}[$i] if $msg->{$id}->{status}[$i] eq 'deferred';
+        if ( $msg->{$id}->{status}[$i] =~ /deferred/ ) {
+            $msg->{$id}->{info}[$i] = $msg->{$id}->{extinfo}[$i];
+            undef( $msg->{$id}->{extinfo}[$i] );
+        }
+        elsif ( $msg->{$id}->{status}[$i] =~ /spam/i) {
+            $msg->{$id}->{info}[$i] = $msg->{$id}->{spam_score_detail};
+        }
+
         if ( defined( $msg->{$id}->{info}[$i] ) ) {
+            if ( $msg->{$id}->{info}[$i] =~ /\(in reply to RCPT TO command\)\)/  && defined( $msg->{$id}->{extinfo}[$i]) ) {
+                $msg->{$id}->{info}[$i] = $msg->{$id}->{extinfo}[$i];
+                undef( $msg->{$id}->{extinfo}[$i] );
+            }
+
             if ( length( $msg->{$id}->{info}[$i] ) > ( $terminalwidth - 18 ) ) { 
                 $msg->{$id}->{info}[$i] = sprintf( "Info: %.*s..", $terminalwidth - 18, $msg->{$id}->{info}[$i] );
             }
@@ -695,19 +706,35 @@ sub Printmailinfo_visual {
 }
 
 
+sub DoWeWantToPrint {
+    $j  = join( ", ", @{ $msg->{$id}->{to} } );
+    $j .= join( ", ", @{ $msg->{$id}->{orig_to} } );
+
+    if ( $address eq 'all' || $msg->{$id}->{from} =~ /$address/i || $j =~ /$address/i || $msg->{$id}->{id} =~ /$address/ ) { 
+        if ( $display_deferred =~ /no|off/i ) {
+            for $i ( 0..$#{ $msg->{$id}->{status} } ) {
+                if ( $msg->{$id}->{status}[$i] eq "deferred" ) {
+                    return "no";
+                }
+            }
+        }
+        return "yes";
+    }
+    return "no";
+}
+
+
 ###
 # Printing the result in chosen format.
 sub printmailinfo {
     # Filling the holes of incomplete records before I check wether to print info...
     unless ( defined( $msg->{$id}->{from}    ) ) { $msg->{$id}->{from}    =  '<!>'  }
     unless ( defined( $msg->{$id}->{to}      ) ) { $msg->{$id}->{to}      = ['<!>'] }
+    if     ( $#{ $msg->{$id}->{to} } == -1   )   { $msg->{$id}->{to}      = ['<!>'] }
     unless ( defined( $msg->{$id}->{orig_to} ) ) { $msg->{$id}->{orig_to} = ['<!>'] }
     unless ( defined( $msg->{$id}->{id}      ) ) { $msg->{$id}->{id}      =  '<!>'  }
 
-    # Check if mail matches optional $address and return if not..
-    $j  = join( ", ", @{ $msg->{$id}->{to} } );
-    $j .= join( ", ", @{ $msg->{$id}->{orig_to} } );
-    if ( $address eq 'all' || $msg->{$id}->{from} =~ /$address/i || $j =~ /$address/i || $msg->{$id}->{id} =~ /$address/ ) { 
+    if ( DoWeWantToPrint() eq "yes" ) {
 
         unless ( defined( $msg->{$id}->{client}       ) ) { $msg->{$id}->{client}       =  '<!>'  }
         unless ( defined( $msg->{$id}->{server}       ) ) { $msg->{$id}->{server}       =  '<!>'  }
@@ -964,7 +991,7 @@ sub ParseLine {
     if ( $_[0] =~ /^(\w\w\w\s{1,2}\d{1,2}) (\d\d:\d\d:\d\d) (.*) postfix\/(\w+)\[\d+\]: ([0-9A-Z]+): (.*)/ ) {
         ( $date, $time, $server, $cmd, $id, $line ) = ( $1, $2, $3, $4, $5, $6 );
         xdbug( "Parsing (Postfix): <<$_[0]>>" );
-        check_date_change() if $date_change =~ /on|true/i;
+        check_date_change() if defined( $date_change ) && $date_change =~ /on|true/i;
         parsepostfix( $_ );
     }
 
