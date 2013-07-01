@@ -983,7 +983,7 @@ sub ParseLine {
     $lines++;
     chomp( $_[0] );
 
-    if (  $_[0] =~ /(warning:.*)/i && $warnings =~ /(on|true)/ ) {
+    if ( $warnings =~ /on|true/ && $_[0] =~ /(warning:.*)/i ) {
         print "$1\n";
     }
 
