@@ -6,7 +6,7 @@
 # in a simple, human readable format.             #
 ###                                             ###
 
-my $version = 'v.010';
+my $version = 'v.011';
 
 
 use strict;
@@ -143,6 +143,8 @@ my $address = $ARGV[0] || 'all';
 
 
 die "$helptext" if $help;
+
+$debug = "true" if $xdebug;
 
 
 # We need to make a number of adjustments if chosen output is csv:
@@ -333,7 +335,7 @@ sub PrintMailInfo_csv() {
 
 sub checkstatuscolor {
     if ( defined( $_[0] ) ) {
-        return $col->{bounced} if $_[0] =~ /bounced/;
+        return $col->{bounced} if $_[0] =~ /bounced|discard/;
         return $col->{sent}    if $_[0] =~ /sent/;
         return $col->{spam}    if $_[0] =~ /is spam/;
         return $col->{notspam} if $_[0] =~ /clean/;
@@ -650,6 +652,11 @@ sub Printmailinfo_visual {
 
     if ( $brief ) {
         for $i ( 0..$#{ $msg->{$id}->{info} } ) {
+            # We only want to print to the relevant recipients:
+            if ( $address ne 'all' && $msg->{$id}->{from} !~ /$address/ ) {
+                 next if $msg->{$id}->{to}[$i] !~ /$address/;
+            }
+               
             print "$msg->{$id}->{deleted_time} $msg->{$id}->{status}[$i] $msg->{$id}->{from} $msg->{$id}->{to}[$i]\n";
         }
     }
@@ -675,6 +682,10 @@ sub Printmailinfo_visual {
 
         print "   $msg->{$id}->{from}\n";
         for $i ( 0..$#{ $msg->{$id}->{status} } ) {
+            # We only want to print to the relevant recipients:
+            if ( $address ne 'all' && $msg->{$id}->{from} !~ /$address/ ) {
+                 next if $msg->{$id}->{to}[$i] !~ /$address/;
+            }
             print "\t$msg->{$id}->{status}[$i] $msg->{$id}->{to}[$i]\n";
             print "\t$msg->{$id}->{delay}[$i] $msg->{$id}->{relay}[$i]\n";
 
@@ -699,6 +710,10 @@ sub Printmailinfo_visual {
             print "$msg->{$id}->{deleted_time} $msg->{$id}->{from} $msg->{$id}->{id}\n";
         }
         for $i ( 0..$#{ $msg->{$id}->{status} } ) {
+            # We only want to print to the relevant recipients:
+            if ( $address ne 'all' && $msg->{$id}->{from} !~ /$address/ ) {
+                 next if $msg->{$id}->{to}[$i] !~ /$address/;
+            }
             print "\t$msg->{$id}->{status}[$i]  $msg->{$id}->{to}[$i] $msg->{$id}->{relay}[$i]\n";
         }
         print "\n";
@@ -771,8 +786,9 @@ sub printmailinfo {
     unless ( checkpostgreytriple() eq "not ok" ) { 
         if ( defined( $postgreylist->{$_[0]} ) ) { delete $postgreylist->{$_[0]} };
     }
-    dbug("Deleting $id");
+    dbug("Deleting $msg->{$id}->{id1}") if defined $msg->{$id}->{id1};
     delete $msg->{ $msg->{$id}->{id1} } if defined $msg->{$id}->{id1};
+    dbug("Deleting $id");
     delete $msg->{$id};
 }
 
@@ -822,6 +838,15 @@ sub parsepostfix {
                 xdbug( "Got to $1." );
             }
         }
+        if ( $line =~ /(discard): (.*);/ ) {
+            push @{ $msg->{$id}->{info}   }, $2;
+            xdbug( "Got info $2." );
+            $msg->{$id}->{deleted_time} = $time;
+            push @{ $msg->{$id}->{status} }, $1;
+            xdbug( "Got status $1." );
+            $readytoprint->{$id} = 1; 
+	        xdbug( "Message discarded, printing mail." );
+        }
     }
     elsif ( $cmd eq 'smtpd'  && $line =~ /^(reject):/ ) {
         push @{ $msg->{$id}->{status} }, $1;
@@ -849,7 +874,8 @@ sub parsepostfix {
         #$readytoprint->{$id} = 1; 
     }
     elsif ( $cmd =~ /(virtual|smtp|error|local)/) {
-        if ( $line =~ /orig_to=<([^>]+)>/ && uniquerecipient( $1 ) eq "yes" ) {
+        #if ( $line =~ /orig_to=<([^>]+)>/ && uniquerecipient( $1 ) eq "yes" ) { # changed due to bug #4.
+        if ( $line =~ /orig_to=<([^>]+)>/ ) {
             push @{ $msg->{$id}->{orig_to} }, $1;
             xdbug( "Got orig_to $1." );
         }
@@ -902,6 +928,9 @@ sub parsetls {
 ###
 # Parsing the mailscanner log line extracting all necessary info into the mailbox hash.
 sub parsemailscanner {
+   # we want to skip certain lines:
+   return if $line =~ /Logging message .* to SQL$/;
+
     if ( $line =~ /Message ([0-9A-F]+)\.[0-9A-F]+/i ) {
         $id = $1;
         $msg->{$id} = $msg->{$id} ||= { id => $id, time => '<!>', server => '<!>', to => [ ] };
@@ -984,7 +1013,7 @@ sub ParseLine {
     chomp( $_[0] );
 
     if ( $warnings =~ /on|true/ && $_[0] =~ /(warning:.*)/i ) {
-        print "$1\n";
+        print "$1\n\n";
     }
 
     # Check if line is in a known Postfix format:
@@ -1131,7 +1160,7 @@ if ($stdin->can_read(.5)) {
 elsif ( defined( $logfile ) ) {
     for $i ( 1 .. $NumberOfFiles-1 ) {	
         $i = $NumberOfFiles - $i;  # We want to parse oldest logs first.
-        print "Reading $path$logfile.$i\n" if ( $debug || $maillog_filename );
+        print "Reading $path$logfile.$i" if ( $debug || $maillog_filename );
 
         if    ( -e "$path$logfile.$i.gz" ) { print ".gz\n" ; readgzfile( "$path$logfile.$i.gz"  ); }
         elsif ( -e "$path$logfile.$i.bz" ) { print ".bz2\n"; readbzfile( "$path$logfile.$i.bz2" ); }
@@ -1178,4 +1207,4 @@ for $i ( keys %$msg ) {
         print "$j\n";
     #}
 }
-print "Done.\n";
+print "Done. $i\n";
