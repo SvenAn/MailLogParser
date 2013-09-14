@@ -6,7 +6,7 @@
 # in a simple, human readable format.             #
 ###                                             ###
 
-my $version = 'v1.0.0-beta2';
+my $version = 'v1.1.0';
 
 
 use strict;
