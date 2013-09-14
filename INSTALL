@@ -1,0 +1,41 @@
+Installation instructions:
+------------------------------------------------------------------------------
+
+1. Copy the mlp file to a suitable directory where executables can be located,
+preferrably in your path. This will normally be in /usr/local/bin, /usr/bin or
+a similar place.  ( You can list your paths by entering 'env |grep ^PATH=' ).
+You can also copy mlp in any other directory, perhaps in your home directory,
+but you may have to use the full path to be able to run the program.
+
+2. Copy mlp.conf in /etc, /etc/mlp, /usr/local/etc or your home catalog.  If
+you choose your home catalog, you need to rename it to .mlprc. 
+
+3. Edit mlp.conf, ( or .mlprc ), and adjust the settings as you like.  The file
+includes a short description of the different parameters, and will give you an
+understandig of what mlp is designed to do.
+Note: Any command line parameter will override the settings in the config file.
+
+4. Try to run 'mlp -h' from your command line to see if perl has all required
+libraries.  You will most likely run into errors like:
+
+    "Can't locate Term/ReadKey.pm in @INC ..".
+
+You will then need to install the Term::Readkey library:
+
+    Debian/Ubuntu/Mint: 'apt-get install libterm-readkey-perl'.
+    Redhat/CentOS: 'yum install perl-TermReadKey.x86_64', (on 64-bit systems). 
+
+
+Limitations:
+------------------------------------------------------------------------------
+
+Mlp requires mail log files rotated daily in a certain format to function properly:
+
+    <filename>.<digit>[.zip|.gz]. Typically something like "maillog.1.gz".
+
+Other name schemes will be supported in a later release. You may avoid this problem
+by piping the log files into mlp:
+
+    "zcat /var/log/whatever-201309.gz | mlp".
+
+   
