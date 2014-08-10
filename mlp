@@ -20,6 +20,11 @@ local $Term::ANSIColor::AUTORESET = 1;
 #use Compress::Zlib;
 
 
+# This parses some extra lines before printing info to make sure all info about the mail is collectd.
+# May be written in mlp.conf later on.
+my $LinesToParseBeforePrint = 1000;
+
+
 my $helptext = <<EOF;
 ###  MailLogParse $version by Sven Andreassen ###
 ##					     ##
@@ -680,6 +685,15 @@ sub Printmailinfo_visual {
             print "\tInfo: Mail is passed to mailscanner, but not checked.\n";
         }
 
+        # Listing the contens of the $msg->{$id} hash if xdebug:
+        #undef( $j);
+        #for ( keys %{$msg->{$id}} ) {
+        #    if ( $_ =~ /to|relay|delay|status|dovecotinfo|info|orig_to/ ) { $msg->{$id}->{$_} = join( ", ", @{ $msg->{$id}->{$_} } ) };
+        #    $j .= "$_: $msg->{$id}->{$_}\n";
+        #}
+        #print "$j\n";
+
+
         print "   $msg->{$id}->{from}\n";
         for $i ( 0..$#{ $msg->{$id}->{status} } ) {
             # We only want to print to the relevant recipients:
@@ -832,18 +846,29 @@ sub parsepostfix {
             $msg->{$id}->{from}  = $1;
             xdbug( "Got from $1." );
         }
-        if ( $line =~/to=<([^>]+)>/ ) {
-            if ( uniquerecipient( $1 ) eq "yes") { 
-                push @{ $msg->{$id}->{to} }, $1;
-                xdbug( "Got to $1." );
-            }
-        }
+        # If we enable this, github bug #8 will reappear.  First recipient logged here may not be the first
+        # recipient to have mail sent, mixing up relay and info information. We may need to enable this again,
+        # but with some additional checks.
+#        if ( $line =~/to=<([^>]+)>/ && $line =~/discard:/ ) {
+#            if ( uniquerecipient( $1 ) eq "yes") { 
+#                push @{ $msg->{$id}->{to} }, $1;
+#                xdbug( "Got to $1." );
+#            }
+#        }
         if ( $line =~ /(discard): (.*);/ ) {
             push @{ $msg->{$id}->{info}   }, $2;
             xdbug( "Got info $2." );
             $msg->{$id}->{deleted_time} = $time;
             push @{ $msg->{$id}->{status} }, $1;
             xdbug( "Got status $1." );
+            push @{ $msg->{$id}->{delay} }, "none";
+            xdbug( "Got delay = none." );
+            if ( $line =~/to=<([^>]+)>/ ) {
+                if ( uniquerecipient( $1 ) eq "yes") { 
+                    push @{ $msg->{$id}->{to} }, $1;
+                    xdbug( "Got to $1." );
+                }
+            }
             $readytoprint->{$id} = 1; 
 	        xdbug( "Message discarded, printing mail." );
         }
@@ -868,8 +893,8 @@ sub parsepostfix {
         $msg->{$id}->{from} = $1 if $line =~ /from=<([^>]+)>/;
         $msg->{$id}->{client} = $1 if $line =~ /RCPT from (.*]): /;
         $msg->{$id}->{size} = 'unknown';
-	    xdbug( "Got reject info, printing mail." );
 
+	    xdbug( "Got reject info, printing mail." );
         printmailinfo( $msg->{$id} ); 
         #$readytoprint->{$id} = 1; 
     }
@@ -884,33 +909,48 @@ sub parsepostfix {
             xdbug( "Got to $1. (2)" );
         }
 
-        push @{ $msg->{$id}->{delay}  }, $1 if $line =~ /delay=(\d+)/;
-        push @{ $msg->{$id}->{delay}  }, $1 if $line =~ /delay=(\d+\.\d+)/;
-        push @{ $msg->{$id}->{status} }, $1 if $line =~ /status=(\w+)/;
-
-        if ( $line =~ /relay=(.*?), /i && $line !~ /status=deferred/ ) {
-            push @{ $msg->{$id}->{relay}  }, $1 if $line =~ /relay=(.*?), /;
+        if ( $line =~ /delay=(\d+)/ || $line =~ /delay=(\d+\.\d+)/ ) {
+            push @{ $msg->{$id}->{delay} }, $1 ;
+            xdbug( "Got Delay=$1." );
         }
 
-        $msg->{$id}->{client} = $1 if $line =~ /client=.*\[(\d{1,3}.\d{1,3}\.\d{1,3}\.\d{1,3})\]/;
+        if ( $line =~ /status=(\w+)/ ) {
+            push @{ $msg->{$id}->{status} }, $1;
+            xdbug( "Got status=$1." );
+        }
+
+        if ( $line =~ /relay=(.*?), /i && $line !~ /status=deferred/ ) {
+            #push @{ $msg->{$id}->{relay}  }, $1 if $line =~ /relay=(.*?), /;
+            push @{ $msg->{$id}->{relay} }, $1;
+            xdbug( "$id got relay=$1." );
+        }
+
+        if ( $line =~ /client=.*\[(\d{1,3}.\d{1,3}\.\d{1,3}\.\d{1,3})\]/ ) {
+            $msg->{$id}->{client} = $1;
+            xdbug( "Got client=$1." );
+        }
 
         # Adjust relay info to "thrash" if mail is bounced.
         if ( defined( $msg->{$id}->{status}[$#{$msg->{$id}->{status}}] ) ) {
             if ( $msg->{$id}->{status}[$#{$msg->{$id}->{status}}] =~ /bounced/ ) {
                 $msg->{$id}->{relay}[$#{$msg->{$id}->{relay}}] = 'thrashcan';
+                xdbug( "Renamed relay to trashcan." );
             }
         }
+
+        # We need to polish the info retreival.  Info is lost. Ref. bug #6.
         push @{ $msg->{$id}->{info} }, $1 if $line =~ /status=.*(\(.*\)$)/;
+        xdbug( "Got Info=$1." );
 
         push @{ $msg->{$id}->{extinfo} }, $1 if $line =~ /host .* said: (.*)/;
+        xdbug( "Got ExtInfo=$1." );
 
         if ( $line =~ /status=deferred/ ) {
             $msg->{$id}->{first_seen} = $time;
             $msg->{$id}->{deleted_time} = $time;
-            printmailinfo( $msg->{$id} ); 
+            #printmailinfo( $msg->{$id} ); 
+            $readytoprint->{$id} = 1; 
         }
-
-	    print "\tDebug: Got client/delay/relay/status info.\n" if $xdebug;
     }
 }
 
@@ -1062,7 +1102,7 @@ sub ParseLine {
     # parsed 10 additional lines to make sure that all info about the spesific mail has been caught. 
     for $i ( keys %$readytoprint ) {
         $readytoprint->{$i}++;
-        if ( $readytoprint->{$i} == 10 ) {
+        if ( $readytoprint->{$i} == $LinesToParseBeforePrint ) {
             $id = $i;
             printmailinfo( $msg->{$i} );
             delete $readytoprint->{$i};
